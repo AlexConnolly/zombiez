@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import townhouse from '../maps/townhouse.json';
 import { NO_INPUT, Sim, TICK, type Command } from './game';
-import { floorIndex, isWalkTile, validateMap, type MapDef } from './map';
+import { facingDir, floorIndex, isWalkTile, validateMap, windowGeom, type MapDef } from './map';
 import { World } from './world';
 
 const map = townhouse as MapDef;
@@ -144,5 +144,63 @@ describe('townhouse map', () => {
     walk(sim, [[2.5, 9.5]], 3);
     expect(p.pos.y).toBeCloseTo(0, 3);
     expect(p.pos.x).toBeGreaterThan(5.2);
+  });
+});
+
+describe('townhouse approach paths', () => {
+  it('the validator rejects a skylight with no room below and a path that ends away from its window', () => {
+    const bad: MapDef = JSON.parse(JSON.stringify(map));
+    const sky = bad.windows.find((w) => w.id === 'skylight')!;
+    sky.cells = [[1, 7]];
+    bad.windows.find((w) => w.id === 'bayLeft')!.approach = [[6, 0, -3]];
+    const errs = validateMap(bad);
+    expect(errs.some((e) => e.includes('skylight') && e.includes('no room below'))).toBe(true);
+    expect(errs.some((e) => e.includes('bayLeft') && e.includes('ends away'))).toBe(true);
+  });
+
+  for (const w of map.windows)
+    it(`a zombie walks the ${w.id} path, breaks in and reaches a player on that floor`, () => {
+      const sim = quiet(3);
+      openAll(sim);
+      const p = sim.state.players[0];
+      p.hp = p.maxHp = 1e9;
+      const g = windowGeom(map, w);
+      const [dx, dz] = facingDir(w.facing);
+      p.pos = w.facing === 'up' ? { ...g.center, x: g.center.x + 2 } : { x: g.inside.x - dx * 2, y: g.inside.y, z: g.inside.z - dz * 2 };
+      sim.state.windows[w.id].boards = 1;
+      const z = sim.spawnZombie(w.id);
+      const hit = g.path.map(() => false);
+      let reached = false;
+      for (let t = 0; t < 70 / TICK && !reached; t++) {
+        sim.step({ p1: NO_INPUT });
+        g.path.forEach((q, i) => (hit[i] ||= Math.hypot(z.pos.x - q.x, z.pos.y - q.y, z.pos.z - q.z) < 0.7));
+        reached = z.state === 'hunt' && Math.hypot(z.pos.x - p.pos.x, z.pos.z - p.pos.z) < 1.5 && Math.abs(z.pos.y - p.pos.y) < 0.5;
+      }
+      expect(hit).toEqual(g.path.map(() => true));
+      expect(sim.state.windows[w.id].boards).toBe(0);
+      expect(reached).toBe(true);
+    });
+
+  it('climbing legs go at 1 m/s', () => {
+    const sim = quiet();
+    openAll(sim);
+    const z = sim.spawnZombie('balcony');
+    z.run = true;
+    z.pos = { x: 7.5, y: 0, z: -0.6 };
+    z.leg = 2;
+    sim.step({ p1: NO_INPUT });
+    sim.step({ p1: NO_INPUT });
+    expect(z.pos.y).toBeCloseTo(2 * TICK * 0.99, 2);
+  });
+
+  it('footsteps on the roof are heard 3 s before a zombie reaches the skylight', () => {
+    const sim = quiet();
+    openAll(sim);
+    const z = sim.spawnZombie('skylight');
+    let roofAt = -1;
+    let t = 0;
+    for (; t < 40 / TICK && z.state === 'approach'; t++) if (sim.step({ p1: NO_INPUT }).some((e) => e.type === 'roof' && e.zid === z.id)) roofAt = t;
+    expect(roofAt).toBeGreaterThan(0);
+    expect((t - roofAt) * TICK).toBeCloseTo(3, 0);
   });
 });

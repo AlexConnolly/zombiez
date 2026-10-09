@@ -85,7 +85,7 @@ export function applySnap(s: Game, map: MapDef, n: Snap) {
   }));
   s.zombies = n.zombies.map(([id, x, y, z, yaw, st, flags, wi]) => ({
     id, pos: { x, y, z }, yaw, state: STATES[st], run: !!(flags & 1), attackT: flags & 2 ? 0.25 : 0,
-    window: map.windows[wi]?.id ?? '', vy: 0, onGround: true, hp: 1, from: { x, y, z }, t: 0, attackCD: 0, node: -1,
+    window: map.windows[wi]?.id ?? '', vy: 0, onGround: true, hp: 1, from: { x, y, z }, leg: 0, t: 0, attackCD: 0, node: -1,
   }));
   map.windows.forEach((w, i) => (s.windows[w.id].boards = n.boards[i]));
   s.doors = n.doors;

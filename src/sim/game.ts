@@ -1,4 +1,4 @@
-import { DIRS, cellCenter, floorIndex, placedPos, windowGeom, type MapDef, type V3 } from './map';
+import { DIRS, cellCenter, facingDir, floorIndex, maxBoards, placedPos, v3, windowGeom, type MapDef, type V3 } from './map';
 import { dist2, moveBody, rayBox, rayWorld, box, type Box } from './physics';
 import { next } from './rng';
 import { KNIFE, PERKS, WEAPONS, type PerkId, type WeaponId } from './weapons';
@@ -14,7 +14,6 @@ const ZOMBIE_H = 1.8;
 const WALK = 4.5;
 const SPRINT = 6.5;
 const USE_RANGE = 1.7;
-const BOARDS = 6;
 const TEAR_TIME = 1.5;
 const REBUILD_TIME = 0.75;
 const BOARD_POINTS_CAP = 50;
@@ -24,6 +23,10 @@ const EFFECT_TIME = 30;
 const DROP_CHANCE = 0.02;
 const MAX_DROPS = 4;
 const ZOMBIE_DAMAGE = 50;
+/** Zombies climb walls and drainpipes at 1 m/s. */
+const CLIMB_SPEED = 1;
+/** Footsteps on the roof are heard this long before a zombie reaches a skylight. */
+const ROOF_WARNING = 3;
 /** Lag compensation looks back at most this many ticks (~350 ms: 250 ms ping + 100 ms interpolation). */
 export const MAX_REWIND = 11;
 const BLEED_TIME = 30;
@@ -69,7 +72,7 @@ export type GameEvent =
   | { type: 'revive'; pid: string; by: string }
   | { type: 'hurt'; pid: string; hp: number }
   | { type: 'board'; window: string; boards: number; torn: boolean }
-  | { type: 'zombieAttack' | 'spawn' | 'climb'; zid: number }
+  | { type: 'zombieAttack' | 'spawn' | 'climb' | 'roof'; zid: number }
   | { type: 'roundStart' | 'roundEnd' | 'gameOver'; round: number }
   | { type: 'door'; id: string }
   | { type: 'buy'; pid: string; what: string }
@@ -124,6 +127,8 @@ export interface Zombie {
   state: 'approach' | 'tear' | 'climb' | 'hunt';
   window: string;
   from: V3;
+  /** Approach: index of the path point being walked to. */
+  leg: number;
   t: number;
   attackT: number;
   attackCD: number;
@@ -188,7 +193,7 @@ export class Sim {
       spawnT: 0,
       players: [],
       zombies: [],
-      windows: Object.fromEntries(map.windows.map((w) => [w.id, { boards: BOARDS, tearT: 0, tearer: -1 }])),
+      windows: Object.fromEntries(map.windows.map((w) => [w.id, { boards: maxBoards(w), tearT: 0, tearer: -1 }])),
       doors: Object.fromEntries(map.doors.map((d) => [d.id, false])),
       zones: { [map.startZone]: true },
       power: !map.power,
@@ -576,7 +581,7 @@ export class Sim {
     };
 
     for (const w of map.windows)
-      if (s.windows[w.id].boards < BOARDS) add(windowGeom(map, w).center, { kind: 'window', id: w.id, label: 'Hold to rebuild barrier', hold: true }, 1.9);
+      if (s.windows[w.id].boards < maxBoards(w)) add(windowGeom(map, w).center, { kind: 'window', id: w.id, label: 'Hold to rebuild barrier', hold: true }, 1.9);
     for (const d of map.doors) {
       if (s.doors[d.id]) continue;
       const fi = floorIndex(map, d.floor);
@@ -673,7 +678,7 @@ export class Sim {
 
   private rebuild(p: Player, id: string) {
     const w = this.state.windows[id];
-    if (w.boards >= BOARDS) return;
+    if (w.boards >= maxBoards(this.map.windows.find((x) => x.id === id)!)) return;
     w.boards++;
     p.stats.boards++;
     this.events.push({ type: 'board', window: id, boards: w.boards, torn: false });
@@ -723,10 +728,14 @@ export class Sim {
     const s = this.state;
     const wins = this.activeWindows();
     const w = windowId ? this.map.windows.find((x) => x.id === windowId)! : wins[Math.floor(this.rand() * wins.length)];
-    const g = windowGeom(this.map, w);
-    const [dx, dz] = DIRS[w.facing];
-    const side = (this.rand() - 0.5) * 3;
-    const pos = v(g.spawn.x + dz * side, g.spawn.y, g.spawn.z + dx * side);
+    let pos: V3;
+    if (w.spawns?.length) pos = v3(w.spawns[Math.floor(this.rand() * w.spawns.length)]);
+    else {
+      const g = windowGeom(this.map, w);
+      const [dx, dz] = facingDir(w.facing);
+      const side = (this.rand() - 0.5) * 3;
+      pos = v(g.spawn.x + dz * side, g.spawn.y, g.spawn.z + dx * side);
+    }
     const z: Zombie = {
       id: s.nextId++,
       pos,
@@ -738,6 +747,7 @@ export class Sim {
       state: 'approach',
       window: w.id,
       from: copy(pos),
+      leg: 0,
       t: 0,
       attackT: 0,
       attackCD: 0,
@@ -768,21 +778,34 @@ export class Sim {
     z.attackCD -= TICK;
 
     if (z.state === 'approach') {
-      const dx = g.outside.x - z.pos.x, dy = g.outside.y - z.pos.y, dz = g.outside.z - z.pos.z;
+      const path = g.path;
+      const to = path[z.leg];
+      const from = z.leg > 0 ? path[z.leg - 1] : z.from;
+      const climb = Math.abs(to.y - from.y) > Math.hypot(to.x - from.x, to.z - from.z);
+      const pace = climb ? CLIMB_SPEED : speed;
+      const dx = to.x - z.pos.x, dy = to.y - z.pos.y, dz = to.z - z.pos.z;
       const d = Math.hypot(dx, dy, dz);
-      const st = Math.min(d, speed * TICK);
+      const st = Math.min(d, pace * TICK);
+      if (win.facing === 'up') {
+        let left = d;
+        for (let i = z.leg + 1; i < path.length; i++) left += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y, path[i].z - path[i - 1].z);
+        if (left / pace > ROOF_WARNING && (left - st) / pace <= ROOF_WARNING) this.events.push({ type: 'roof', zid: z.id });
+      }
       if (d > 1e-6) {
         z.pos.x += (dx / d) * st;
         z.pos.y += (dy / d) * st;
         z.pos.z += (dz / d) * st;
-        z.yaw = Math.atan2(-dx, -dz);
+        if (!climb) z.yaw = Math.atan2(-dx, -dz);
       }
-      if (d < 0.6) z.state = 'tear';
+      if (z.leg < path.length - 1) { if (st >= d) z.leg++; }
+      else if (d < 0.6) z.state = 'tear';
       return;
     }
     if (z.state === 'tear') {
-      const [fx, fz] = DIRS[win.facing];
-      z.yaw = Math.atan2(fx, fz);
+      if (win.facing !== 'up') {
+        const [fx, fz] = DIRS[win.facing];
+        z.yaw = Math.atan2(fx, fz);
+      }
       if (ws.boards > 0) {
         if (ws.tearer < 0 || !s.zombies.some((o) => o.id === ws.tearer && o.state === 'tear')) { ws.tearer = z.id; ws.tearT = 0; }
         if (ws.tearer !== z.id) return;

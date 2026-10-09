@@ -96,6 +96,7 @@ export class World {
       ),
     );
 
+    const skylights = new Set(map.windows.filter((w) => w.facing === 'up').flatMap((w) => w.cells.map(([x, z]) => this.node(floorIndex(map, w.floor), x, z))));
     map.floors.forEach((f, fi) => {
       const Y = f.y;
       const H = floorHeight(map, fi);
@@ -115,7 +116,7 @@ export class World {
           if (t === '.' || t === 'D') vis(box(x, Y - SLAB, z, x + 1, Y, z + 1), 'floor');
           const holeOverStairs = (t === ' ' || t === 'R') && tile(map, fi - 1, x, z) === 'S';
           const interior = t !== ' ' || holeOverStairs;
-          if (interior && t !== 'S' && (!above || tile(map, fi + 1, x, z) === ' '))
+          if (interior && t !== 'S' && !skylights.has(this.node(fi, x, z)) && (!above || tile(map, fi + 1, x, z) === ' '))
             vis(box(x, Y + H - SLAB, z, x + 1, Y + H, z + 1), 'roof');
         }),
       );

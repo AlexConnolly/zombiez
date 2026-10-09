@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { EYE, type GameEvent, type PowerupKind, type Sim, type Zombie } from '../sim/game';
-import { DIRS, floorHeight, floorIndex, placedPos, windowGeom, windowOpening, type V3 } from '../sim/map';
+import { DIRS, facingDir, floorHeight, floorIndex, maxBoards, placedPos, windowGeom, windowOpening, type MapDef, type V3 } from '../sim/map';
 import { WEAPONS, type WeaponId } from '../sim/weapons';
 
 const C = {
@@ -129,6 +129,7 @@ interface ZMesh {
   head: THREE.Object3D;
   phase: number;
   flinch: number;
+  lastY: number;
 }
 
 interface Particle { m: THREE.Mesh; v: THREE.Vector3; life: number; grav: number }
@@ -193,7 +194,10 @@ export class Renderer {
     this.camera.add(this.knife);
     for (const k of ['maxAmmo', 'instaKill', 'doublePoints', 'nuke'] as PowerupKind[])
       this.pupMat.set(k, new THREE.MeshBasicMaterial({ map: iconTexture(k), transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false }));
-    this.buildExterior();
+    const moonDisc = new THREE.Mesh(new THREE.CircleGeometry(6, 32), new THREE.MeshBasicMaterial({ color: 0xcfd9e8, fog: false }));
+    moonDisc.position.set(-90, 70, -110);
+    moonDisc.lookAt(0, 0, 0);
+    this.scene.add(moonDisc);
     addEventListener('resize', () => this.resize());
     this.resize();
   }
@@ -212,15 +216,12 @@ export class Renderer {
 
   // ---------------------------------------------------------------- level
 
-  private buildExterior() {
+  /** The country outside the Farmhouse: a flat field, trees and fences in the fog. */
+  private countryside() {
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), lam(0x161d14));
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.02;
-    this.scene.add(ground);
-    const moonDisc = new THREE.Mesh(new THREE.CircleGeometry(6, 32), new THREE.MeshBasicMaterial({ color: 0xcfd9e8, fog: false }));
-    moonDisc.position.set(-90, 70, -110);
-    moonDisc.lookAt(0, 0, 0);
-    this.scene.add(moonDisc);
+    this.level.add(ground);
     // Trees and fence posts as dark silhouettes in the fog, placed by a fixed pattern.
     const treeMat = lam(0x0b0f0b);
     const trunk = lam(0x1a130d);
@@ -231,25 +232,140 @@ export class Renderer {
       const h = 5 + ((i * 13) % 5);
       const cone = new THREE.Mesh(new THREE.ConeGeometry(1.6 + (i % 3) * 0.5, h, 6), treeMat);
       cone.position.set(x, h / 2 + 1.2, z);
-      this.scene.add(cone, boxMesh(0.3, 1.4, 0.3, trunk, x, 0.7, z));
+      this.level.add(cone, boxMesh(0.3, 1.4, 0.3, trunk, x, 0.7, z));
     }
     const post = lam(0x2a2018);
     for (let i = -14; i <= 28; i += 2.5) {
-      this.scene.add(boxMesh(0.15, 1.1, 0.15, post, i, 0.55, -9), boxMesh(0.15, 1.1, 0.15, post, i, 0.55, 26));
+      this.level.add(boxMesh(0.15, 1.1, 0.15, post, i, 0.55, -9), boxMesh(0.15, 1.1, 0.15, post, i, 0.55, 26));
     }
-    this.scene.add(boxMesh(43, 0.1, 0.08, post, 7, 0.9, -9), boxMesh(43, 0.1, 0.08, post, 7, 0.9, 26));
-    // Rain outside the house footprint.
+    this.level.add(boxMesh(43, 0.1, 0.08, post, 7, 0.9, -9), boxMesh(43, 0.1, 0.08, post, 7, 0.9, 26));
+  }
+
+  /** Rain everywhere around the house but not inside it. */
+  private makeRain(map: MapDef) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const f of map.floors) f.tiles.forEach((r, z) => [...r].forEach((t, x) => {
+      if (t === ' ') return;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x + 1); z0 = Math.min(z0, z); z1 = Math.max(z1, z + 1);
+    }));
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const n = 3500;
     const pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
       let x = 0, z = 0;
-      do { x = -23 + Math.random() * 60; z = -22 + Math.random() * 60; } while (x > -0.5 && x < 14.5 && z > -0.5 && z < 16.5);
+      do { x = cx - 30 + Math.random() * 60; z = cz - 30 + Math.random() * 60; } while (x > x0 - 0.5 && x < x1 + 0.5 && z > z0 - 0.5 && z < z1 + 0.5);
       pos.set([x, Math.random() * 18, z], i * 3);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.rain = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8fa6c8, size: 0.025, transparent: true, opacity: 0.35 }));
-    this.scene.add(this.rain);
+    this.level.add(this.rain);
+  }
+
+  /** A map's own outside: ground boxes, props and the roof. All render only. */
+  private townscape(map: MapDef) {
+    const hex = (c: string) => parseInt(c.slice(1), 16);
+    for (const g of map.ground ?? []) {
+      const [ax, ay, az] = g.min, [bx, by, bz] = g.max;
+      this.level.add(boxMesh(bx - ax, by - ay, bz - az, lamC(hex(g.color)), (ax + bx) / 2, (ay + by) / 2, (az + bz) / 2));
+    }
+    const iron = lamC(0x111214);
+    for (const p of map.props ?? []) {
+      const grp = new THREE.Group();
+      grp.position.set(...p.pos);
+      grp.rotation.y = p.rot ?? 0;
+      const [w, h, d] = p.size ?? [1, 1, 1];
+      const col = p.color ? hex(p.color) : 0;
+      if (p.kind === 'box') grp.add(boxMesh(w, h, d, lamC(col || 0x4a3428), 0, h / 2, 0));
+      if (p.kind === 'house') {
+        // A neighbour: brick block, some windows lit, mansard roof.
+        grp.add(boxMesh(w, h, d, lamC(0x4e3226), 0, h / 2, 0));
+        const lit = basic(0xd9a050), dark = basic(0x0c0e12);
+        for (let f = 0; f * 3 + 3.6 < h; f++)
+          for (const side of [-1, 1])
+            for (const wx of [-2.5, 2]) {
+              const on = Math.sin(p.pos[0] * 7.1 + f * 3.3 + wx * 1.7 + side) > 0.6;
+              grp.add(boxMesh(1.4, 1.7, 0.05, on ? lit : dark, wx, f * 3 + 1.6, side * (d / 2 + 0.03)));
+            }
+        grp.add(boxMesh(w, 0.3, d - 4, lamC(0x24262b), 0, h + 0.15, 0));
+        for (const side of [-1, 1]) grp.add(boxMesh(w, 0.2, 3.2, lamC(0x24262b), 0, h - 1.3, side * (d / 2 - 1.2)).rotateX(side * 0.75));
+      }
+      if (p.kind === 'car') {
+        const paint = lamC(col || 0x333333);
+        grp.add(boxMesh(1.8, 0.7, 4.2, paint, 0, 0.6, 0), boxMesh(1.6, 0.55, 2.2, paint, 0, 1.2, 0.2));
+        grp.add(boxMesh(1.62, 0.4, 2.0, basic(0x0a0c10), 0, 1.22, 0.2));
+        for (const [x, z] of [[-0.85, 1.3], [0.85, 1.3], [-0.85, -1.3], [0.85, -1.3]]) grp.add(boxMesh(0.25, 0.6, 0.6, lamC(0x0c0c0c), x, 0.3, z));
+      }
+      if (p.kind === 'streetlamp') {
+        grp.add(boxMesh(0.14, 5.2, 0.14, iron, 0, 2.6, 0), boxMesh(0.12, 0.12, 1, iron, 0, 5.2, 0.45), boxMesh(0.4, 0.15, 0.5, basic(0xffb347), 0, 5.1, 0.9));
+        const light = new THREE.PointLight(0xff9a30, 30, 22, 1.4);
+        light.position.set(0, 4.8, 0.9);
+        grp.add(light);
+      }
+      if (p.kind === 'bin') grp.add(boxMesh(0.6, 1.05, 0.7, lamC(col || 0x1c1e22), 0, 0.53, 0), boxMesh(0.64, 0.06, 0.74, lamC(0x101010), 0, 1.08, 0));
+      if (p.kind === 'railing') {
+        // Black iron railings: a top bar and posts every 15 cm along the long side.
+        const long = w > d;
+        const len = long ? w : d;
+        grp.add(boxMesh(long ? len : 0.05, 0.05, long ? 0.05 : len, iron, 0, h, 0));
+        for (let i = 0; i <= len / 0.15; i++) {
+          const o = -len / 2 + i * 0.15;
+          grp.add(boxMesh(0.025, h, 0.025, iron, long ? o : 0, h / 2, long ? 0 : o));
+        }
+      }
+      if (p.kind === 'steps') {
+        // Steps down from pos: dropping h over a run of d towards +z.
+        const n = Math.round(h / 0.25);
+        for (let i = 0; i < n - 1; i++) {
+          const top = -(i + 1) * (h / n);
+          grp.add(boxMesh(w, h + top, d / n, lamC(0x403e3a), 0, (top - h) / 2, (i + 0.5) * (d / n)));
+        }
+      }
+      if (p.kind === 'portico') {
+        for (const x of [-w / 2 + 0.15, w / 2 - 0.15]) grp.add(boxMesh(0.3, h, 0.3, lamC(0xc8c0b0), x, h / 2, -d / 2 + 0.2));
+        grp.add(boxMesh(w + 0.3, 0.3, d, lamC(0xc8c0b0), 0, h + 0.15, 0));
+      }
+      if (p.kind === 'balcony') {
+        grp.add(boxMesh(w, 0.2, d, lamC(0xb8b0a0), 0, 0.1, 0));
+        grp.add(boxMesh(w, 0.05, 0.05, iron, 0, 1.2, -d / 2));
+        for (let i = 0; i <= w / 0.15; i++) grp.add(boxMesh(0.025, 1, 0.025, iron, -w / 2 + i * 0.15, 0.7, -d / 2));
+      }
+      this.level.add(grp);
+    }
+    if (map.roof) this.roof(map, map.roof);
+  }
+
+  /** Mansard roof over the top floor: slopes from the eaves to a flat top, with gaps for dormers and skylights. */
+  private roof(map: MapDef, r: { eaves: number; ridge: number }) {
+    const f = map.floors[map.floors.length - 1];
+    const xs = f.tiles.flatMap((row) => [...row].flatMap((t, x) => (t === ' ' ? [] : [x])));
+    const zs = f.tiles.flatMap((row, z) => (row.trim() ? [z] : []));
+    const x0 = Math.min(...xs), x1 = Math.max(...xs) + 1, z0 = Math.min(...zs), z1 = Math.max(...zs) + 1;
+    const slate = lamC(0x2b2f36);
+    const run = 3;
+    const rise = r.ridge - r.eaves;
+    const len = Math.hypot(run, rise);
+    const tilt = Math.atan2(rise, run);
+    const top = map.windows.filter((w) => w.floor === f.id);
+    const gap = (x: number, side: 'n' | 's' | 'up', z = 0) => top.some((w) => w.facing === side && w.cells.some((c) => c[0] === x && (side !== 'up' || c[1] === z)));
+    for (let x = x0; x < x1; x++) {
+      for (const side of ['n', 's'] as const) {
+        const sgn = side === 'n' ? -1 : 1;
+        const edge = side === 'n' ? z0 - 0.5 : z1 + 0.5;
+        // Over a dormer only a flat lid; elsewhere the slope.
+        if (gap(x, side)) this.level.add(boxMesh(1, 0.15, 2.4, slate, x + 0.5, r.eaves + 2.6, edge - sgn * 1.2));
+        else this.level.add(boxMesh(1, 0.15, len, slate, x + 0.5, r.eaves + rise / 2, edge - sgn * (run / 2)).rotateX(sgn * tilt));
+      }
+      for (let z = Math.round(z0 - 0.5 + run); z < z1 + 0.5 - run; z++) if (!gap(x, 'up', z)) this.level.add(boxMesh(1, 0.15, 1, slate, x + 0.5, r.ridge - 0.075, z + 0.5));
+    }
+    for (const w of top.filter((w) => w.facing === 'n' || w.facing === 's')) {
+      const wx = w.cells.map((c) => c[0]);
+      const sgn = w.facing === 'n' ? -1 : 1;
+      const edge = w.facing === 'n' ? z0 - 0.5 : z1 + 0.5;
+      for (const x of [Math.min(...wx) - 0.05, Math.max(...wx) + 1.05]) this.level.add(boxMesh(0.1, 2.6, 2.4, slate, x, r.eaves + 1.3, edge - sgn * 1.2));
+    }
+    // Chimney stacks on the party walls.
+    for (const x of [x0 + 0.5, x1 - 0.5]) this.level.add(boxMesh(1, 2.2, 2, lamC(0x4e3226), x, r.ridge + 1, (z0 + z1) / 2));
   }
 
   load(sim: Sim) {
@@ -268,6 +384,9 @@ export class Renderer {
     this.dying = [];
     this.lamps = [];
     this.perkPanels = [];
+    if (map.ground) this.townscape(map);
+    else this.countryside();
+    this.makeRain(map);
 
     // Static boxes: one instanced mesh, colour per kind, slight variation so flat walls read as surfaces.
     const rb = sim.world.renderBoxes;
@@ -292,21 +411,31 @@ export class Renderer {
     const plank = lam(C.wood);
     for (const w of map.windows) {
       const g = windowGeom(map, w);
-      const [dx, dz] = DIRS[w.facing];
+      const [dx, dz] = facingDir(w.facing);
       const [lo, hi] = windowOpening(map, w);
       const width = w.cells.length * map.cellSize;
       const list: THREE.Mesh[] = [];
-      for (let i = 0; i < 6; i++) {
-        const y = g.center.y + lo + 0.12 + ((hi - lo - 0.24) * i) / 5;
-        const b = boxMesh(width + 0.2, 0.16, 0.07, plank, g.center.x + dx * 0.55, y, g.center.z + dz * 0.55);
-        b.rotation.y = dx ? Math.PI / 2 : 0;
-        b.rotation[dx ? 'x' : 'z'] = (i % 2 ? 1 : -1) * 0.08;
+      const n = maxBoards(w);
+      for (let i = 0; i < n; i++) {
+        let b: THREE.Mesh;
+        if (w.facing === 'up') {
+          // Skylight: boards laid flat across the opening.
+          const xs = w.cells.map((c) => c[0]), zs = w.cells.map((c) => c[1]);
+          const wx = Math.max(...xs) - Math.min(...xs) + 1, wz = Math.max(...zs) - Math.min(...zs) + 1;
+          b = boxMesh(wx + 0.2, 0.07, 0.16, plank, g.center.x, g.center.y + floorHeight(map, floorIndex(map, w.floor)) - 0.05, g.center.z - wz / 2 + 0.1 + ((wz - 0.2) * i) / (n - 1));
+          b.rotation.y = (i % 2 ? 1 : -1) * 0.08;
+        } else {
+          const y = g.center.y + lo + 0.12 + ((hi - lo - 0.24) * i) / (n - 1);
+          b = boxMesh(width + 0.2, 0.16, 0.07, plank, g.center.x + dx * 0.55, y, g.center.z + dz * 0.55);
+          b.rotation.y = dx ? Math.PI / 2 : 0;
+          b.rotation[dx ? 'x' : 'z'] = (i % 2 ? 1 : -1) * 0.08;
+        }
         list.push(b);
         this.level.add(b);
       }
       this.boards.set(w.id, list);
-      // Upper windows: a lean-to roof the zombies climb.
-      if (g.center.y > 0) {
+      // Upper windows with no path of their own: a lean-to roof the zombies climb.
+      if (g.center.y > 0 && !w.approach) {
         const len = Math.hypot(g.spawn.x - g.outside.x, g.outside.y, g.spawn.z - g.outside.z);
         const roof = boxMesh(width + 1.6, 0.15, len, lam(0x2a2420));
         roof.position.set((g.spawn.x + g.outside.x) / 2 + dx * 0.3, g.outside.y / 2 - 0.1, (g.spawn.z + g.outside.z) / 2 + dz * 0.3);
@@ -462,7 +591,7 @@ export class Renderer {
     head.add(boxMesh(0.3, 0.32, 0.3, skin), boxMesh(0.06, 0.045, 0.02, eye, -0.07, 0.03, -0.155), boxMesh(0.06, 0.045, 0.02, eye, 0.07, 0.03, -0.155));
     body.add(head);
     this.level.add(root);
-    return { root, body, legs, arms, head, phase: z.id, flinch: 0 };
+    return { root, body, legs, arms, head, phase: z.id, flinch: 0, lastY: z.pos.y };
   }
 
   private animateZombie(m: ZMesh, z: Zombie, dt: number) {
@@ -472,7 +601,16 @@ export class Renderer {
     m.legs[0].rotation.x = s * (z.run ? 0.8 : 0.5) * (moving ? 1 : 0.1);
     m.legs[1].rotation.x = -m.legs[0].rotation.x;
     const reach = -Math.PI / 2 + 0.15;
-    if (z.state === 'tear') {
+    // Climbing a wall or drainpipe: hand over hand, legs kicking.
+    const climbing = z.state === 'approach' && Math.abs(m.root.position.y - m.lastY) > dt * 0.4;
+    m.lastY = m.root.position.y;
+    if (climbing) {
+      m.phase += dt * 6;
+      m.arms[0].rotation.x = -Math.PI + 0.3 + Math.sin(m.phase) * 0.5;
+      m.arms[1].rotation.x = -Math.PI + 0.3 - Math.sin(m.phase) * 0.5;
+      m.legs[0].rotation.x = Math.sin(m.phase) * 0.6;
+      m.legs[1].rotation.x = -m.legs[0].rotation.x;
+    } else if (z.state === 'tear') {
       m.arms[0].rotation.x = reach - 0.5 + Math.sin(this.time * 9) * 0.6;
       m.arms[1].rotation.x = reach - 0.5 - Math.sin(this.time * 9) * 0.6;
     } else if (z.attackT > 0) {

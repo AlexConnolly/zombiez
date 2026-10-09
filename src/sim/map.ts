@@ -1,5 +1,8 @@
 export type V3 = { x: number; y: number; z: number };
 export type Dir = 'n' | 's' | 'e' | 'w';
+/** Windows may also face up: a skylight, entered by dropping from the roof. */
+export type Facing = Dir | 'up';
+export type P3 = [number, number, number];
 export type Cell = [number, number];
 
 export const DIRS: Record<Dir, Cell> = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
@@ -28,8 +31,12 @@ export interface MapDef {
     id: string;
     floor: string;
     cells: Cell[];
-    facing: Dir;
+    facing: Facing;
     zone: string;
+    /** Where zombies for this window appear; one is picked at random. */
+    spawns?: P3[];
+    /** Points walked from the spawn, ending outside the window. A leg that rises or drops more than it travels is climbed at 1 m/s. */
+    approach?: P3[];
     /** Barricade size; defaults to 6. */
     boards?: number;
     /** Opening height above the floor, [bottom, top]. */
@@ -43,6 +50,13 @@ export interface MapDef {
   perks: (Placed & { perk: string })[];
   power?: Placed & { facing: Dir };
   lamps: Placed[];
+  /** Render only: the outside ground as boxes, replacing the flat plane. */
+  ground?: { min: P3; max: P3; color: string }[];
+  /** Render only: street furniture, neighbours and so on. size is [w, h, d]; rot turns about y. */
+  props?: { kind: string; pos: P3; size?: P3; rot?: number; color?: string }[];
+  /** Render only: a mansard roof over the top floor, from the eaves up to a flat top at the ridge. */
+  roof?: { eaves: number; ridge: number };
+  ambience?: 'country' | 'city';
 }
 
 export type WindowDef = MapDef['windows'][number];
@@ -70,16 +84,27 @@ export function windowOpening(map: MapDef, w: WindowDef): [number, number] {
   return map.floors[floorIndex(map, w.floor)].y < 0 ? [2.0, 2.8] : [0.9, 2.3];
 }
 
+export const maxBoards = (w: WindowDef) => w.boards ?? 6;
+export const facingDir = (f: Facing): Cell => (f === 'up' ? [0, 0] : DIRS[f]);
+export const v3 = ([x, y, z]: P3): V3 => ({ x, y, z });
+
 export function windowGeom(map: MapDef, w: WindowDef) {
   const fi = floorIndex(map, w.floor);
-  const [dx, dz] = DIRS[w.facing];
+  const [dx, dz] = facingDir(w.facing);
   const cs = w.cells.map(([x, z]) => cellCenter(map, fi, x, z));
   const c = { x: cs.reduce((a, p) => a + p.x, 0) / cs.length, y: map.floors[fi].y, z: cs.reduce((a, p) => a + p.z, 0) / cs.length };
-  const outY = Math.max(0, c.y);
   const s = map.cellSize;
+  const plain = w.facing === 'up'
+    ? { x: c.x, y: c.y + floorHeight(map, fi) + 0.3, z: c.z }
+    : { x: c.x + dx * 0.9 * s, y: Math.max(0, c.y), z: c.z + dz * 0.9 * s };
+  const path = w.approach?.map(v3) ?? [plain];
   return {
     center: c,
-    outside: { x: c.x + dx * 0.9 * s, y: outY, z: c.z + dz * 0.9 * s },
+    /** Where a zombie stands to tear the boards. */
+    outside: path[path.length - 1],
+    /** The same spot worked out from the window alone; an approach path must end near it. */
+    plain,
+    path,
     inside: { x: c.x - dx * s, y: c.y, z: c.z - dz * s },
     spawn: { x: c.x + dx * 7 * s, y: 0, z: c.z + dz * 7 * s },
   };
@@ -105,6 +130,19 @@ export function validateMap(map: MapDef): string[] {
   for (const w of map.windows) {
     checkFloor(w.floor, `window ${w.id}`);
     if (!zones.has(w.zone)) errs.push(`window ${w.id}: zone ${w.zone} is never opened`);
+    const g = windowGeom(map, w);
+    const o = g.outside, q = g.plain;
+    const top = g.center.y + floorHeight(map, floorIndex(map, w.floor));
+    const yOk = w.facing === 'up' ? o.y >= top && o.y < top + 1 : o.y > g.center.y - 0.5 && o.y <= top;
+    if (Math.hypot(o.x - q.x, o.z - q.z) > 1 || !yOk) errs.push(`window ${w.id}: approach path ends away from the window`);
+    if (w.facing === 'up') {
+      const fi = floorIndex(map, w.floor);
+      for (const c of w.cells) {
+        if (at(w.floor, c) !== '.') errs.push(`window ${w.id}: skylight cell ${c} has no room below`);
+        if (tile(map, fi + 1, c[0], c[1]) !== ' ') errs.push(`window ${w.id}: skylight cell ${c} is covered by the floor above`);
+      }
+      continue;
+    }
     for (const c of w.cells) {
       if (at(w.floor, c) !== 'W') errs.push(`window ${w.id}: cell ${c} is not a W tile`);
       const [dx, dz] = DIRS[w.facing];
