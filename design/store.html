@@ -161,7 +161,7 @@ const views = {
     const eye = V(8.5, 1.6, -9);
     withRaw(sc, () => spot(sc, V(8.7, 1.45, -9.2), V(-0.02, -0.06, -1), '#fff4dc', 7, 14, 13));
     const cam = camera(eye, V(8.5, 1.5, -24), 700, W, H, 1);
-    return render(sc, cam, gunModel() + vignette(W, H, 0.92)) + caption('Lights out', 'Before the power is on: your torch, green exit signs, and their eyes.');
+    return render(sc, cam, gunModel() + vignette(W, H, 0.92)) + caption('Power cut · round 5', 'The lights are gone until someone restarts the generator: your torch, exit signs, their eyes.');
   },
 
   lit() {
@@ -169,7 +169,7 @@ const views = {
     store(sc, { powered: true });
     zombie(sc, 8.4, 0, -16, 1, 0, 0.3); zombie(sc, 9.1, 0, -20.5, 1, 0.2, 0.1); zombie(sc, 7.8, 0, -23.5, 1, -0.2, 0);
     const cam = camera(V(8.5, 1.6, -9), V(8.5, 1.5, -24), 700, W, H, 1);
-    return render(sc, cam, gunModel() + vignette(W, H, 0.6)) + caption('Power on', 'Strip lights snap on aisle by aisle. Same aisle, same three zombies.');
+    return render(sc, cam, gunModel() + vignette(W, H, 0.6)) + caption('Rounds 1 to 4', 'Mains power: learn the store while you can see it. Same aisle, same three zombies.');
   },
 
   overview() {
