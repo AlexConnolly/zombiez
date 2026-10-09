@@ -1,0 +1,220 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; font-family: Inter, sans-serif; }
+  .view { display: none; position: relative; }
+  .view.on { display: block; }
+  .cap { position: absolute; left: 28px; bottom: 22px; font: 600 15px Inter; color: #e9e2d6; text-shadow: 0 2px 8px #000; letter-spacing: .02em; }
+  .cap b { font: 600 22px Oswald; letter-spacing: .06em; text-transform: uppercase; display: block; color: #fff; }
+</style>
+</head>
+<body>
+<div class="view" id="carpark"></div>
+<div class="view" id="dark"></div>
+<div class="view" id="lit"></div>
+<div class="view" id="overview"></div>
+<div class="view" id="freezer"></div>
+<div class="view" id="office"></div>
+<script src="r3d.js"></script>
+<script>
+// The Abandoned Store: 40 x 34 m hall, x 0..40 across, z 0 (shopfront) .. -34 (back wall), ceiling 6 m.
+const W = 1280, H = 720, S1 = { s: 1 };
+const STRIP = '#eef4ff', EXIT = '#30ff7a', FROST = '#7ac8ff', CARPARK = '#9fb4d8';
+let seed = 11;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const PRODUCT = ['#c0392b', '#e67e22', '#f1c40f', '#27ae60', '#2980b9', '#8e44ad', '#ecf0f1', '#d35400', '#16a085'];
+const SHELVES = [5, 10, 15, 20, 25];
+
+function store(sc, o = {}) {
+  seed = 11;
+  // Floor and walls.
+  box(sc, 0, -0.2, -34, 40, 0, 0, '#7e7c74', { sub: 1.2 });
+  if (!o.noCeiling) box(sc, 0, 6, -34, 40, 6.3, 0, '#2a2c30', { sub: 1.6 });
+  box(sc, -0.3, 0, -34, 0, 6, 0, '#9a9890', { sub: 1.2 });
+  box(sc, 40, 0, -34, 40.3, 6, 0, '#9a9890', { sub: 1.2 });
+  box(sc, 0, 0, -34.3, 40, 6, -34, '#8a8880', { sub: 1.2 });
+  // Shopfront: wall above glass, glass panels glowing faintly with car park light, boarded doors.
+  if (!o.noFront) {
+    box(sc, 0, 3, 0, 40, 6, 0.3, '#6a6c70', { sub: 1.2 });
+    for (const [x0, x1] of [[0, 4], [10, 14], [18, 22], [26, 30], [36, 40]]) box(sc, x0, 0, 0, x1, 3, 0.3, '#5a5c60', { sub: 1 });
+    for (const [x0, x1] of [[4, 10], [14, 18], [22, 26], [30, 36]]) {
+      quad(sc, V(x1, 0, 0.15), V(x0, 0, 0.15), V(x0, 3, 0.15), V(x1, 3, 0.15), '#2a3a52', { emissive: 0.5, sub: 1 });
+      boards(sc, x0 + 0.3, x1 - 0.3, 0.4, 2.6, 0.05, 5, { double: true });
+    }
+  }
+  // Shelving rows with product blocks on both faces.
+  for (const x of SHELVES) {
+    box(sc, x, 0, -22, x + 2, 2.2, -10, '#c8c4b8', { sub: 0.8 });
+    for (let lv = 0; lv < 4; lv++)
+      for (let z = -21.6; z < -10.2; z += 1.2)
+        for (const face of [x - 0.06, x + 2]) {
+          if (rnd() < 0.18) continue; // gaps: looted shelves
+          const c = PRODUCT[Math.floor(rnd() * PRODUCT.length)];
+          box(sc, face, 0.25 + lv * 0.5, z, face + 0.06, 0.55 + lv * 0.5, z + 1.0, c, { sub: 1 });
+        }
+  }
+  // Tills.
+  for (let x = 6; x <= 26; x += 4) { box(sc, x, 0, -6, x + 1.5, 0.95, -4, '#d8d4cc', { sub: 0.6 }); box(sc, x, 0.95, -6, x + 1.5, 1.05, -4, '#b02a2a'); box(sc, x + 1.1, 0.95, -4.5, x + 1.4, 2, -4.2, '#2a2a2a'); }
+  // Fresh: freezer cabinets (always glowing), produce tables, bakery and walk-in freezer rooms.
+  box(sc, 31, 0, -19, 33, 0.9, -10, '#d8dde2', { sub: 0.6 }); box(sc, 31.1, 0.9, -18.9, 32.9, 0.93, -10.1, FROST, { emissive: 1.4 });
+  light(sc, V(32, 1.4, -14.5), FROST, 0.8, 4);
+  box(sc, 35, 0, -19, 39, 0.8, -15, '#5a4030'); box(sc, 35.1, 0.8, -18.9, 38.9, 0.95, -15.1, '#4a8a3a', { sub: 0.5 });
+  const walls = (x0, z0, x1, z1, col, gap) => {
+    box(sc, x0, 0, z1 - 0.15, x1, 3.2, z1, col, { sub: 0.8 });
+    box(sc, x0, 0, z0, x1, 3.2, z0 + 0.15, col, { sub: 0.8 });
+    box(sc, x0, 0, z0, x0 + 0.15, 3.2, gap ? (z0 + z1) / 2 - 1 : z1, col, { sub: 0.8 });
+    if (gap) box(sc, x0, 0, (z0 + z1) / 2 + 1, x0 + 0.15, 3.2, z1, col, { sub: 0.8 });
+  };
+  walls(34, -14, 40, -8, '#c8a878', true);
+  walls(34, -26, 40, -20, '#b8c8d8', true);
+  light(sc, V(37, 2.6, -23), FROST, 1.2, 4);
+  box(sc, 38.5, 0, -14, 39.6, 2, -13.3, '#5a0d10'); box(sc, 38.55, 1.4, -13.35, 39.55, 1.8, -13.3, '#ff4a40', { emissive: 2.5 });
+  // Stockroom wall with staff doors, racking, plant room, loading doors.
+  // Under the mezzanine (x 4..20) the stockroom wall stops at the office floor, so the offices are open to the hall.
+  box(sc, 0, 0, -26.15, 4, 6, -26, '#8a8880', { sub: 1 }); box(sc, 4, 0, -26.15, 12, 3.8, -26, '#8a8880', { sub: 1 });
+  box(sc, 15, 0, -26.15, 20, 3.8, -26, '#8a8880', { sub: 1 }); box(sc, 20, 0, -26.15, 40, 6, -26, '#8a8880', { sub: 1 });
+  box(sc, 12, 3, -26.15, 15, 3.8, -26, '#8a8880');
+  for (const x of [4, 14, 24]) for (const z of [-29, -31.5]) {
+    for (const xx of [x, x + 4, x + 8]) box(sc, xx, 0, z, xx + 0.12, 4, z + 1, '#e0b020');
+    for (const y of [1.2, 2.6, 3.9]) box(sc, x, y, z, x + 8.1, y + 0.1, z + 1, '#e0b020');
+    for (const y of [0.1, 1.3, 2.7]) if (rnd() < 0.8) box(sc, x + 0.3 + rnd() * 3, y, z + 0.1, x + 2.3 + rnd() * 4, y + 1, z + 0.9, '#9a7a50', { sub: 1 });
+  }
+  box(sc, 14, 0, -34.05, 18, 4, -33.95, '#5a5c60'); box(sc, 20, 0, -34.05, 24, 4, -33.95, '#5a5c60');
+  // Mezzanine offices: floor 4 m up, glass front facing the aisles, stairs at the back left.
+  box(sc, 4, 3.8, -30, 20, 4, -22, '#4a3a2a', { sub: 1 });
+  for (const x of [4, 20]) box(sc, x - 0.1, 0, -22.1, x + 0.1, 3.8, -21.9, '#3a3a3a');
+  quad(sc, V(20, 4, -22), V(4, 4, -22), V(4, 6, -22), V(20, 6, -22), '#a8c8e8', { alpha: 0.18, emissive: 0.3, double: true, sub: 2 });
+  box(sc, 4, 4, -30.1, 20, 6, -30, '#c8b898', { sub: 1 });
+  for (let i = 0; i < 16; i++) box(sc, 0, 0, -26 - i * 0.375, 2, (i + 1) * 0.25, -26 - (i + 1) * 0.375, '#5a5c60');
+  // Exit signs: green glow over each door.
+  for (const [x, z, f] of [[0.05, -19, 'x'], [39.95, -15, 'x'], [16, -0.1, 'z'], [24, -0.1, 'z'], [16, -33.9, 'z'], [13.5, -26.2, 'z']]) {
+    const p = V(x, 3.1, z);
+    box(sc, x - (f === 'z' ? 0.4 : 0.02), 3, z - (f === 'x' ? 0.4 : 0.02), x + (f === 'z' ? 0.4 : 0.02), 3.25, z + (f === 'x' ? 0.4 : 0.02), EXIT, { emissive: 3 });
+    light(sc, p, EXIT, 0.5, 3.5);
+    glow(sc, p, EXIT, 0.5, 0.6);
+  }
+  // Mess: spilled tins, a knocked-over trolley, a banner.
+  for (let i = 0; i < 40; i++) { const x = 1 + rnd() * 28, z = -9 - rnd() * 15; box(sc, x, 0, z, x + 0.15, 0.12, z + 0.15, PRODUCT[i % PRODUCT.length]); }
+  for (const [x, z] of [[9.2, -13.5], [13, -18.5], [23, -9.5], [3, -6]]) { box(sc, x, 0.15, z, x + 0.6, 0.9, z + 0.9, '#9aa0a8', { skip: ['top'], sub: 1 }); }
+  quad(sc, V(22, 4.6, -9.9), V(8, 4.6, -9.9), V(8, 5.3, -9.9), V(22, 5.3, -9.9), '#c0392b', { double: true, sub: 2 });
+  if (o.powered) {
+    // Strip lights over every aisle and cross-aisle.
+    for (const x of [2.5, 8.5, 13.5, 18.5, 23.5, 28.5]) for (const z of [-12, -18]) {
+      box(sc, x - 0.1, 5.85, z - 1.5, x + 0.1, 5.95, z + 1.5, STRIP, { emissive: 3 });
+      light(sc, V(x, 5.4, z), STRIP, 0.75, 8);
+    }
+    for (const x of [6, 16, 26, 36]) { box(sc, x - 1.5, 5.85, -7.1, x + 1.5, 5.95, -6.9, STRIP, { emissive: 3 }); light(sc, V(x, 5.4, -6), STRIP, 0.7, 8); }
+    for (const x of [8, 20, 32]) light(sc, V(x, 3.5, -31), '#ffe8b0', 0.8, 6);
+    light(sc, V(12, 5.6, -26), '#ffe8b0', 1, 6);
+    light(sc, V(36, 5.4, -17), STRIP, 0.6, 8);
+  }
+}
+
+const label = (cam, x, y, z, title, sub) => {
+  const p = projectWorld(cam, V(x, y, z));
+  return p ? `<g font-family="Inter" text-anchor="middle"><text x="${p[0]}" y="${p[1]}" fill="#fff" font-family="Oswald" font-size="20" letter-spacing="1" style="paint-order:stroke" stroke="#000" stroke-width="4">${title}</text><text x="${p[0]}" y="${p[1] + 18}" fill="#e0dad0" font-size="13" style="paint-order:stroke" stroke="#000" stroke-width="3">${sub}</text></g>` : '';
+};
+const prompt = (text, cost) => `<g font-family="Inter" font-weight="600" font-size="20" fill="#f2eee6" style="paint-order:stroke" stroke="#000" stroke-width="4"><rect x="490" y="497" width="28" height="26" rx="4" fill="none" stroke="#f2eee6" stroke-width="2"/><text x="504" y="516" text-anchor="middle" font-size="16" stroke-width="0">E</text><text x="528" y="518">${text} <tspan fill="#e8b84a">${cost}</tspan></text></g>`;
+const gunModel = () => `<polygon points="860,720 900,560 1010,540 1080,720" fill="#1b1c1f"/><polygon points="900,560 1010,540 1030,600 925,618" fill="#2a2c30"/>`;
+
+const views = {
+  carpark() {
+    const sc = Scene({ ...S1, ambient: [0.04, 0.045, 0.07], fog: { c: [0.05, 0.06, 0.09], start: 18, end: 80, max: 0.8 }, sky: skyGrad('#04060b', '#16203a') });
+    // Building shell seen from outside.
+    box(sc, -2, 0, -34, 42, 7.5, 0, '#5a5e66', { sub: 1.6 });
+    box(sc, -2, 7.5, -34, 42, 7.8, 0.6, '#3a3c42', { sub: 2 });
+    for (const [x0, x1] of [[4, 10], [14, 18], [22, 26], [30, 36]]) {
+      box(sc, x0, 0, 0, x1, 3, 0.05, '#1a2638', { emissive: 0.35, sub: 0.8 });
+      boards(sc, x0 + 0.3, x1 - 0.3, 0.4, 2.6, 0.12, 5);
+    }
+    box(sc, 14, 2.2, 0.05, 26, 3, 0.4, '#3a3c42'); // shutter housings, half down
+    box(sc, 14, 2.4, 0.06, 18, 3, 0.08, '#7a7e86'); box(sc, 22, 1.6, 0.06, 26, 3, 0.08, '#7a7e86');
+    box(sc, 12, 4, 0.02, 28, 6.2, 0.4, '#1c1e24'); // sign board
+    // Car park: tarmac, bay lines, cars, trolley bay, lamps (two dead).
+    box(sc, -30, -0.2, 0, 70, 0, 50, '#17191c', { sub: 3 });
+    for (let x = -2; x < 44; x += 2.6) for (const z of [12, 22]) quad(sc, V(x + 0.08, 0.01, z - 2.4), V(x, 0.01, z - 2.4), V(x, 0.01, z + 2.4), V(x + 0.08, 0.01, z + 2.4), '#8a8a80', { sub: 3, emissive: 0.2 });
+    for (const [x, z, c] of [[6, 12, '#7a2a2a'], [14, 22, '#2a4a6a'], [27, 12, '#5a5a52'], [33, 22, '#3a5a3a'], [-6, 20, '#6a6a70']]) {
+      withRaw(sc, () => { box(sc, x, 0.25, z - 2, x + 1.8, 1.05, z + 2.1, c, { sub: 0.8 }); box(sc, x + 0.1, 1.05, z - 1, x + 1.7, 1.6, z + 1.1, '#1c2630', { sub: 0.8 }); });
+    }
+    for (let i = 0; i < 8; i++) box(sc, 38 + i * 0.3, 0.2, 6, 38.2 + i * 0.3, 1, 7.4, '#8a9098');
+    const lamp = (x, z, on) => {
+      box(sc, x - 0.1, 0, z - 0.1, x + 0.1, 8, z + 0.1, '#2a2c30');
+      box(sc, x - 0.6, 7.8, z - 0.3, x + 0.6, 8.1, z + 0.3, on ? '#e8f4ff' : '#3a3c40', { emissive: on ? 3 : 0 });
+      if (on) { light(sc, V(x, 7.4, z), CARPARK, 2.6, 9); glow(sc, V(x, 7.9, z), '#d8e8ff', 1.6, 0.5); }
+    };
+    lamp(4, 17, true); lamp(20, 17, false); lamp(36, 17, true); lamp(20, 32, true); lamp(-10, 30, false);
+    const cam = camera(V(25, 1.7, 34), V(20, 3.4, 0), 820, W, H, 1);
+    for (const [x, z, f] of [[18, 8, Math.PI], [23.5, 4, Math.PI + 0.2], [9, 15, Math.PI - 0.4], [30, 18, Math.PI + 0.5], [26, 26, 2.8], [3, 7, Math.PI]]) zombie(sc, x, 0, z, 1, f, 0.2);
+    const sign = projectWorld(cam, V(20, 5.1, 0.45));
+    const name = sign ? `<text x="${sign[0]}" y="${sign[1] + 14}" text-anchor="middle" font-family="Oswald" font-size="46" font-weight="700" letter-spacing="8" fill="#ff5a3a" fill-opacity=".85" style="filter:drop-shadow(0 0 8px #ff3a1a)">FOO<tspan fill-opacity=".15">D</tspan>HALL</text>` : '';
+    return render(sc, cam, name + rain(W, H, 380) + vignette(W, H)) + caption('The car park', 'Long walk across open tarmac: you see them coming. Half the sign is dead, two of the lamps too.');
+  },
+
+  dark() {
+    const sc = Scene({ ...S1, ambient: [0.012, 0.014, 0.02] });
+    store(sc);
+    zombie(sc, 8.4, 0, -16, 1, 0, 0.3); zombie(sc, 9.1, 0, -20.5, 1, 0.2, 0.1); zombie(sc, 7.8, 0, -23.5, 1, -0.2, 0);
+    const eye = V(8.5, 1.6, -9);
+    withRaw(sc, () => spot(sc, V(8.7, 1.45, -9.2), V(-0.02, -0.06, -1), '#fff4dc', 7, 14, 13));
+    const cam = camera(eye, V(8.5, 1.5, -24), 700, W, H, 1);
+    return render(sc, cam, gunModel() + vignette(W, H, 0.92)) + caption('Lights out', 'Before the power is on: your torch, green exit signs, and their eyes.');
+  },
+
+  lit() {
+    const sc = Scene({ ...S1, ambient: [0.05, 0.05, 0.055], exposure: 1.1 });
+    store(sc, { powered: true });
+    zombie(sc, 8.4, 0, -16, 1, 0, 0.3); zombie(sc, 9.1, 0, -20.5, 1, 0.2, 0.1); zombie(sc, 7.8, 0, -23.5, 1, -0.2, 0);
+    const cam = camera(V(8.5, 1.6, -9), V(8.5, 1.5, -24), 700, W, H, 1);
+    return render(sc, cam, gunModel() + vignette(W, H, 0.6)) + caption('Power on', 'Strip lights snap on aisle by aisle. Same aisle, same three zombies.');
+  },
+
+  overview() {
+    const sc = Scene({ ...S1, ambient: [0.04, 0.04, 0.05], exposure: 1.1, sky: skyGrad('#04060a', '#121a28') });
+    store(sc, { powered: true, noCeiling: true });
+    box(sc, -20, -0.4, -60, 70, -0.2, 30, '#121418', { sub: 4 });
+    for (const [x, z, f] of [[4, -12, 1], [12.5, -14, 2], [17.5, -20, 0], [28.5, -16, 2.5], [22, -8, 3], [37, -22, -1], [16, -33, 3]]) zombie(sc, x, 0, z, 1, f, 0.2);
+    player(sc, 2.5, 0, -18, 1, '#3a6ea5'); player(sc, 12, 4, -26, 1, '#a5543a'); player(sc, 30, 0, -8, 1, '#3aa56e');
+    const cam = camera(V(-14, 30, 22), V(20, 0, -17), 820, W, 900, 1);
+    const tags = label(cam, 15, 3, -16, 'B · AISLES', 'the loop · 750') + label(cam, 20, 2, -3, 'A · CHECKOUTS', 'start') + label(cam, 37, 3.6, -17, 'C · FRESH', 'freezer trap · 1000') + label(cam, 26, 5, -31, 'D · STOCKROOM', 'power · 1250') + label(cam, 12, 7, -26, 'E · OFFICES', 'mezzanine · 1500');
+    return render(sc, cam, tags + vignette(W, 900, 0.5)) + caption('The whole store, roof off', 'One floor, one loop round the shelves, offices on a mezzanine looking down.');
+  },
+
+  freezer() {
+    const sc = Scene({ ...S1, ambient: [0.03, 0.035, 0.05] });
+    store(sc, { powered: false });
+    // Frosty walk-in with zombies piling in; the door is open.
+    for (const [x, z, f] of [[36, -22, 2.2], [37.5, -23.5, 1.4], [38.6, -21.4, 3], [35.4, -24.6, 1.9]]) zombie(sc, x, 0, z, 1, f, 0.2);
+    for (let i = 0; i < 6; i++) box(sc, 39.4, 0.2 + i * 0.45, -25.5, 39.8, 0.3 + i * 0.45, -20.5, '#9ab0c4');
+    light(sc, V(37, 2.8, -23), FROST, 2.6, 5);
+    withRaw(sc, () => spot(sc, V(30.9, 1.45, -21.6), V(0.95, -0.1, -0.3), '#fff4dc', 5, 12, 14));
+    const cam = camera(V(30.6, 1.6, -21.4), V(37, 1.1, -23.2), 680, W, H, 1);
+    return render(sc, cam, gunModel() + prompt('Slam the freezer door', '500') + vignette(W, H, 0.85)) + caption('Walk-in freezer trap', 'Lure a train in, slam the door. They freeze solid and shatter after 3 seconds.');
+  },
+
+  office() {
+    const sc = Scene({ ...S1, ambient: [0.05, 0.05, 0.055], exposure: 1.1 });
+    store(sc, { powered: true });
+    // Office interior on the mezzanine: desk, PA microphone, filing cabinet, monitor glow.
+    box(sc, 14.5, 4, -25.6, 17.5, 4.8, -24.4, '#6a4a30', { sub: 0.4 });
+    box(sc, 16.1, 4.8, -25.2, 16.9, 5.3, -24.9, '#1a1c20'); box(sc, 16.15, 4.85, -24.92, 16.85, 5.25, -24.9, '#7ab0ff', { emissive: 2 });
+    box(sc, 15, 4.8, -25, 15.1, 5.2, -24.9, '#2a2a2a'); box(sc, 14.95, 5.2, -25.05, 15.15, 5.3, -24.85, '#3a3a3a');
+    box(sc, 4.2, 4, -29.8, 5, 5.4, -29, '#7a7e86');
+    light(sc, V(11, 5.6, -26), '#ffe8b0', 1.6, 4);
+    for (const [x, z, f] of [[8.5, -17, 0.3], [13.5, -14, 0.1], [18.5, -19, -0.2], [23.5, -12, 0.4], [3, -15, 0.2]]) zombie(sc, x, 0, z, 1, f, 0.2);
+    player(sc, 2.5, 0, -12, 1, '#3aa56e');
+    const cam = camera(V(11, 5.7, -22.7), V(11.5, 0, -11), 640, W, H, 1);
+    return render(sc, cam, prompt('Closing-time announcement', '1,000') + vignette(W, H, 0.6)) + caption('Mezzanine office', 'The PA pulls every zombie to one speaker for 15 seconds. The glass looks over the whole floor.');
+  },
+};
+
+const id = location.hash.slice(1) || 'carpark';
+const el = document.getElementById(id);
+el.innerHTML = views[id]();
+el.classList.add('on');
+</script>
+</body>
+</html>
