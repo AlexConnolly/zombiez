@@ -33,10 +33,15 @@ const norm = (a) => mul(a, 1 / (len(a) || 1));
 const lerp3 = (a, b, t) => add(a, mul(sub(b, a), t));
 const hex = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 
+/** The Townhouse is drawn 1.5x the size of the first plans (9 x 18 m inside). People and props keep their size. */
+const SCALE = 1.5;
 function Scene(o = {}) {
-  return { quads: [], lights: [], glows: [], lines: [], ambient: o.ambient ?? [0.1, 0.1, 0.12], fog: o.fog ?? null, sky: o.sky ?? null, exposure: o.exposure ?? 1.5 };
+  return { quads: [], lights: [], glows: [], lines: [], ambient: o.ambient ?? [0.1, 0.1, 0.12], fog: o.fog ?? null, sky: o.sky ?? null, exposure: o.exposure ?? 1.5, s: o.s ?? SCALE, rawMode: false };
 }
-function quad(sc, p0, p1, p2, p3, color, o = {}) { sc.quads.push({ p: [p0, p1, p2, p3], c: hex(color), o }); }
+/** Building coordinates are scaled across and deep (not up); anything drawn inside withRaw is placed as given. */
+const xf = (sc, p) => (sc.rawMode ? p : V(p.x * sc.s, p.y, p.z * sc.s));
+function withRaw(sc, fn) { sc.rawMode = true; try { fn(); } finally { sc.rawMode = false; } }
+function quad(sc, p0, p1, p2, p3, color, o = {}) { sc.quads.push({ p: [p0, p1, p2, p3].map((p) => xf(sc, p)), c: hex(color), o }); }
 /** Axis box; corners are listed counter-clockwise seen from outside so back faces can be culled. */
 function box(sc, x0, y0, z0, x1, y1, z1, color, o = {}) {
   const c = (x, y, z) => V(x, y, z);
@@ -50,15 +55,16 @@ function box(sc, x0, y0, z0, x1, y1, z1, color, o = {}) {
   };
   for (const [k, f] of Object.entries(faces)) if (!(o.skip || []).includes(k)) quad(sc, ...f, o.colors?.[k] ?? color, o);
 }
-function light(sc, pos, color, intensity, range) { sc.lights.push({ pos, c: hex(color), i: intensity, r: range }); }
-function glow(sc, pos, color, radius, alpha = 0.7) { sc.glows.push({ pos, color, radius, alpha }); }
-function line3(sc, a, b, color, width = 1.5, alpha = 1) { sc.lines.push({ a, b, color, width, alpha }); }
+function light(sc, pos, color, intensity, range) { sc.lights.push({ pos: xf(sc, pos), c: hex(color), i: intensity, r: range * (sc.rawMode ? 1 : Math.sqrt(sc.s)) }); }
+function glow(sc, pos, color, radius, alpha = 0.7) { sc.glows.push({ pos: xf(sc, pos), color, radius, alpha }); }
+function line3(sc, a, b, color, width = 1.5, alpha = 1) { sc.lines.push({ a: xf(sc, a), b: xf(sc, b), color, width, alpha }); }
 
-function camera(eye, target, f, w, h) {
+function camera(eye0, target0, f, w, h, s = SCALE) {
+  const eye = V(eye0.x * s, eye0.y, eye0.z * s), target = V(target0.x * s, target0.y, target0.z * s);
   const fw = norm(sub(target, eye));
   const right = norm(cross(fw, V(0, 1, 0)));
   const up = cross(right, fw);
-  return { eye, fw, right, up, f, w, h };
+  return { eye, fw, right, up, f, w, h, s };
 }
 function project(cam, p) {
   const d = sub(p, cam.eye);
@@ -67,6 +73,8 @@ function project(cam, p) {
   return [cam.w / 2 + (cam.f * dot(d, cam.right)) / z, cam.h / 2 - (cam.f * dot(d, cam.up)) / z, z];
 }
 
+/** Project a building coordinate (unscaled), for labels and overlays drawn by the views. */
+function projectWorld(cam, p) { return project(cam, V(p.x * cam.s, p.y, p.z * cam.s)); }
 function shade(sc, n, c, base, emissive) {
   let r = sc.ambient[0], g = sc.ambient[1], b = sc.ambient[2];
   for (const l of sc.lights) {
@@ -134,7 +142,11 @@ const PAL = {
 };
 const SODIUM = '#ffa040', LAMP = '#ffc884', MOON = '#9fb4d8';
 
-function zombie(sc, x, y, z, s = 1, face = 0, lean = 0) {
+function zombie(sc, x0, y, z0, s = 1, face = 0, lean = 0) {
+  const x = x0 * sc.s, z = z0 * sc.s;
+  withRaw(sc, () => zombieBody(sc, x, y, z, s, face, lean));
+}
+function zombieBody(sc, x, y, z, s, face, lean) {
   const k = (v) => v * s;
   const r = (dx, dz) => { const c = Math.cos(face), sn = Math.sin(face); return [x + dx * c - dz * sn, z + dx * sn + dz * c]; };
   const part = (dx0, y0, dz0, dx1, y1, dz1, col) => {
@@ -151,7 +163,11 @@ function zombie(sc, x, y, z, s = 1, face = 0, lean = 0) {
   glow(sc, V(ex1, y + k(1.62), ez1), '#ffe060', 0.05 * s, 0.95);
   glow(sc, V(ex2, y + k(1.62), ez2), '#ffe060', 0.05 * s, 0.95);
 }
-function player(sc, x, y, z, s = 1, stripe = '#3a6ea5') {
+function player(sc, x0, y, z0, s = 1, stripe = '#3a6ea5') {
+  const x = x0 * sc.s, z = z0 * sc.s;
+  withRaw(sc, () => playerBody(sc, x, y, z, stripe));
+}
+function playerBody(sc, x, y, z, stripe) {
   box(sc, x - 0.2, y, z - 0.1, x - 0.03, y + 0.8, z + 0.1, '#22262e');
   box(sc, x + 0.03, y, z - 0.1, x + 0.2, y + 0.8, z + 0.1, '#22262e');
   box(sc, x - 0.25, y + 0.8, z - 0.15, x + 0.25, y + 1.42, z + 0.15, '#2e3440');
@@ -319,7 +335,7 @@ const views = {
     box(sc, 3.6, -2.2, 0.1, 5.2, -0.8, 0.14, '#ffb060', { emissive: 1.6 }); light(sc, V(4.4, -1, 1), '#ffb060', 1, 2);
     // Street lamps and a parked car.
     lampPost(sc, -3, 3.6); lampPost(sc, 9, 3.6); lampPost(sc, 21, 3.6);
-    box(sc, 7.5, 0.2, 5, 11.6, 1.1, 6.8, '#4a6a8a'); box(sc, 8.3, 1.1, 5.1, 10.6, 1.7, 6.7, '#1c2630'); box(sc, 8.4, 1.15, 5.08, 10.5, 1.65, 5.1, '#3a5a7a', { emissive: 0.3 });
+    withRaw(sc, () => { const cx = 9.55 * SCALE - 2.05, cz = 5.9 * SCALE - 0.9; box(sc, cx, 0.2, cz, cx + 4.1, 1.1, cz + 1.8, '#4a6a8a'); box(sc, cx + 0.8, 1.1, cz + 0.1, cx + 3.1, 1.7, cz + 1.7, '#1c2630'); box(sc, cx + 0.9, 1.15, cz + 0.08, cx + 3, 1.65, cz + 0.1, '#3a5a7a', { emissive: 0.3 }); });
     // Zombies: on the pavement, at the lightwell, climbing to the balcony.
     zombie(sc, -1.5, 0, 2.6, 1, -2.4); zombie(sc, 1.2, 0, 2.2, 1, Math.PI + 0.3, 0.3); zombie(sc, 4.3, -3, 0.9, 1, Math.PI);
     zombie(sc, 5.2, 1.6, 0.9, 1, Math.PI, 0.5); zombie(sc, 13, 0, 6.5, 1, -1.2); zombie(sc, -8, 0, 7, 1, 1.1);
@@ -339,7 +355,7 @@ const views = {
     const cam = camera(V(-3.5, 8, 14), V(3, 3.2, -6), 760, W, 900);
     let tags = '';
     for (const [name, rooms, y] of labels) {
-      const p = project(cam, V(6.6, y, 0.3));
+      const p = projectWorld(cam, V(6.6, y, 0.3));
       if (p) tags += `<g font-family="Inter" text-anchor="start"><text x="${p[0] + 12}" y="${p[1]}" fill="#f2eee6" font-family="Oswald" font-size="22" letter-spacing="1">${name.toUpperCase()}</text><text x="${p[0] + 12}" y="${p[1] + 20}" fill="#b8b0a4" font-size="14">${rooms}</text></g>`;
     }
     return render(sc, cam, tags + vignette(W, 900, 0.6)) + caption('The house, front wall removed', 'Five floors, one stair along the left wall. Each floor has its own colour so you always know where you are.');
@@ -372,7 +388,7 @@ const views = {
     light(sc, V(2.1, y + 2.4, -3.5), LAMP, 2.6, 4);
     box(sc, 2.04, y + 2.45, -3.56, 2.16, y + 2.6, -3.44, '#ffe6b0', { emissive: 4 }); glow(sc, V(2.1, y + 2.5, -3.5), LAMP, 0.8, 0.6);
     const cam = camera(V(2.2, 1.6, 0.3), V(2.2, 1.45, -6), 700, W, H);
-    const pr = (p) => project(cam, p);
+    const pr = (p) => projectWorld(cam, p);
     const a = pr(V(3.7, 1.25, -4.7));
     const tag = a ? `<g font-family="Inter"><line x1="${a[0]}" y1="${a[1]}" x2="${a[0] + 80}" y2="${a[1] - 60}" stroke="#e8b84a" stroke-width="1.5"/><text x="${a[0] + 86}" y="${a[1] - 64}" fill="#e8b84a" font-size="15" font-weight="600">Gas cooker trap · 1000</text></g>` : '';
     const prompt = `<g font-family="Inter" font-weight="600" font-size="20" fill="#f2eee6" style="paint-order:stroke" stroke="#000" stroke-width="4"><rect x="512" y="497" width="28" height="26" rx="4" fill="none" stroke="#f2eee6" stroke-width="2"/><text x="526" y="516" text-anchor="middle" font-size="16" stroke-width="0">E</text><text x="550" y="518">Light the gas <tspan fill="#e8b84a">1,000</tspan></text></g>`;
@@ -409,7 +425,7 @@ const views = {
     const cam = camera(V(1.6, 1.6, 0.2), V(2.4, 1.5, -6.5), 680, W, H);
     // Ripper chalk outline on the left wall.
     const pts = [[0, 0], [1, 0], [1, 0.12], [0.75, 0.12], [0.68, 0.36], [0.56, 0.36], [0.6, 0.12], [0.36, 0.12], [0.3, 0.24], [0.18, 0.24], [0.22, 0.12], [0, 0.12]];
-    const chalk = pts.map(([u, v]) => project(cam, V(0.01, y + 1.75 - v * 0.9, -3.4 - u * 1.4))).filter(Boolean).map((p) => `${p[0]},${p[1]}`).join(' ');
+    const chalk = pts.map(([u, v]) => projectWorld(cam, V(0.01, y + 1.75 - v * 0.9, -3.4 - u * 1.4))).filter(Boolean).map((p) => `${p[0]},${p[1]}`).join(' ');
     return render(sc, cam, `<polygon points="${chalk}" fill="none" stroke="#e8e2d0" stroke-width="2.5" stroke-opacity=".85"/>` + vignette(W, H)) + caption('1st floor drawing room', 'The biggest room in the house. Balcony doors to the street, the Ripper on the wall.');
   },
 
@@ -438,7 +454,7 @@ const views = {
     light(sc, V(1.4, y + 1.6, -1.4), LAMP, 0.9, 2.5);
     const cam = camera(V(3, 1.5, 0.3), V(3, 1.6, -6), 640, W, H);
     // Shaft of moonlight from the skylight.
-    const s = [V(2.4, y + 2.58, -4.6), V(3.6, y + 2.58, -4.6), V(3.9, y, -3.8), V(2.1, y, -3.8)].map((p) => project(cam, p));
+    const s = [V(2.4, y + 2.58, -4.6), V(3.6, y + 2.58, -4.6), V(3.9, y, -3.8), V(2.1, y, -3.8)].map((p) => projectWorld(cam, p));
     const shaft = s.every(Boolean) ? `<polygon points="${s.map((p) => `${p[0]},${p[1]}`).join(' ')}" fill="#9fb4d8" fill-opacity="0.12"/>` : '';
     return render(sc, cam, shaft + vignette(W, H, 0.85)) + caption('The loft', 'Low, dark, and the only room with a way in from above: listen for footsteps on the slates.');
   },
@@ -447,7 +463,7 @@ const views = {
     // Furnished top-down plans with light pools: 2D, drawn directly.
     const C = 34, X = (i) => 40 + i * 248, Y0 = 110;
     let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="620" viewBox="0 0 ${W} 620"><defs><radialGradient id="pool"><stop offset="0" stop-color="#ffc884" stop-opacity=".55"/><stop offset="1" stop-color="#ffc884" stop-opacity="0"/></radialGradient><radialGradient id="cold"><stop offset="0" stop-color="#9fb4d8" stop-opacity=".35"/><stop offset="1" stop-color="#9fb4d8" stop-opacity="0"/></radialGradient><pattern id="steps" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#5a3c26"/><line x1="0" y1="7" x2="8" y2="7" stroke="#2a1a10" stroke-width="2"/></pattern></defs><rect width="${W}" height="620" fill="#0e1014"/>`;
-    s += `<text x="40" y="50" fill="#f2eee6" font-family="Oswald" font-size="30" letter-spacing="2">THE TOWNHOUSE · FLOOR PLANS</text><text x="40" y="76" fill="#9a9389" font-family="Inter" font-size="15">Street at the top of each plan. 1 square = 1 m. Warm pools are lamps; blue is moonlight through windows.</text>`;
+    s += `<text x="40" y="50" fill="#f2eee6" font-family="Oswald" font-size="30" letter-spacing="2">THE TOWNHOUSE · FLOOR PLANS</text><text x="40" y="76" fill="#9a9389" font-family="Inter" font-size="15">Street at the top of each plan. Each floor is 9 &#215; 18 m inside. Warm pools are lamps; blue is moonlight through windows.</text>`;
     const floors = [
       { name: 'Basement · 750', col: PAL.basement, rooms: [[1, 1, 2, 4, 'Vault'], [3, 1, 6, 6, 'Kitchen'], [3, 7, 5, 12, 'Scullery'], [1, 9, 2, 12, 'Store']], up: [1, 5, 2, 8], back: [6, 7, 6, 12],
         furn: [[5.2, 1.2, 0.7, 1.2, '#20242a'], [3.6, 3, 1.4, 1.6, '#6b4a2b'], [3.1, 0.2, 1.3, 0.6, '#d8d4cc'], [4.4, 9, 1, 1, '#4a4a48'], [3.3, 10.6, 0.9, 0.6, '#e8b84a']], lamps: [[4.5, 3], [4, 9.5]], tags: [[4.5, 5.6, 'gas trap'], [1.5, 3.4, 'power'], [4, 11.7, 'box, shotgun']] },
