@@ -105,13 +105,27 @@ export function rayBox(o: V3, d: V3, b: Box): number {
   return t0;
 }
 
+/** Nearest hit along the ray, walking the 1 m grid columns it crosses and stopping once nothing nearer can follow. */
 export function rayWorld(o: V3, d: V3, maxT: number, solids: SolidIndex[]): number {
   let best = maxT;
-  // ponytail: tests every box along the ray's bounding area; switch to grid DDA if shots get slow.
-  const ex = { x: o.x + d.x * maxT, z: o.z + d.z * maxT };
-  for (const s of solids)
-    for (const b of s.near(Math.min(o.x, ex.x), Math.min(o.z, ex.z), Math.max(o.x, ex.x), Math.max(o.z, ex.z)))
-      best = Math.min(best, rayBox(o, d, b));
+  let x = Math.floor(o.x);
+  let z = Math.floor(o.z);
+  const sx = Math.sign(d.x), sz = Math.sign(d.z);
+  let tx = sx ? ((sx > 0 ? x + 1 : x) - o.x) / d.x : Infinity;
+  let tz = sz ? ((sz > 0 ? z + 1 : z) - o.z) / d.z : Infinity;
+  const dx = sx ? 1 / Math.abs(d.x) : Infinity;
+  const dz = sz ? 1 / Math.abs(d.z) : Infinity;
+  const seen = new Set<Box>();
+  for (let t = 0; t <= best;) {
+    for (const s of solids)
+      for (const b of s.near(x + 0.5, z + 0.5, x + 0.5, z + 0.5)) {
+        if (seen.has(b)) continue;
+        seen.add(b);
+        best = Math.min(best, rayBox(o, d, b));
+      }
+    if (tx < tz) { t = tx; tx += dx; x += sx; } else { t = tz; tz += dz; z += sz; }
+    if (!Number.isFinite(t)) break;
+  }
   return best;
 }
 

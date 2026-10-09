@@ -141,6 +141,7 @@ export class World {
       dyn.push(box(x + 0.05, Y, z + 0.2, x + 0.95, Y + 0.9, z + 0.8));
     }
     this.dynamic = new SolidIndex(dyn);
+    this.flows.clear();
 
     const walk = (n: number) => {
       if (n < 0 || closed.has(n) || this.blocked.has(n)) return false;
@@ -202,24 +203,50 @@ export class World {
     return -1;
   }
 
-  /** Path cost from every node to the target node (Dijkstra). Unreachable = Infinity. */
+  private flows = new Map<number, Float64Array>();
+
+  /** Path cost from every node to the target node (Dijkstra). Unreachable = Infinity. Cached until the doors change. */
   flow(target: number): Float64Array {
+    const hit = this.flows.get(target);
+    if (hit) return hit;
     const d = new Float64Array(this.nodeCount).fill(Infinity);
-    if (target < 0) return d;
-    d[target] = 0;
-    // ponytail: array-scan priority queue, O(n^2) on ~700 nodes; use a heap if maps grow past a few thousand cells.
-    const open = new Set([target]);
-    while (open.size) {
-      let u = -1;
-      for (const n of open) if (u < 0 || d[n] < d[u]) u = n;
-      open.delete(u);
-      for (const [v, c] of this.edges[u]) {
-        if (d[u] + c < d[v]) {
-          d[v] = d[u] + c;
-          open.add(v);
+    if (target >= 0) {
+      d[target] = 0;
+      // Binary heap of [cost, node]; stale entries are skipped when popped.
+      const heap: [number, number][] = [[0, target]];
+      const less = (i: number, j: number) => heap[i][0] < heap[j][0];
+      const swap = (i: number, j: number) => { [heap[i], heap[j]] = [heap[j], heap[i]]; };
+      while (heap.length) {
+        const [du, u] = heap[0];
+        const end = heap.pop()!;
+        if (heap.length) {
+          heap[0] = end;
+          for (let i = 0; ;) {
+            const l = 2 * i + 1, r = l + 1;
+            let m = i;
+            if (l < heap.length && less(l, m)) m = l;
+            if (r < heap.length && less(r, m)) m = r;
+            if (m === i) break;
+            swap(i, m);
+            i = m;
+          }
+        }
+        if (du > d[u]) continue;
+        for (const [v, c] of this.edges[u]) {
+          if (du + c >= d[v]) continue;
+          d[v] = du + c;
+          heap.push([d[v], v]);
+          for (let i = heap.length - 1; i > 0;) {
+            const parent = (i - 1) >> 1;
+            if (!less(i, parent)) break;
+            swap(i, parent);
+            i = parent;
+          }
         }
       }
     }
+    if (this.flows.size > 64) this.flows.clear();
+    this.flows.set(target, d);
     return d;
   }
 
