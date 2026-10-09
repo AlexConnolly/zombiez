@@ -1,0 +1,500 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; font-family: Inter, sans-serif; }
+  .view { display: none; position: relative; }
+  .view.on { display: block; }
+  .cap { position: absolute; left: 28px; bottom: 22px; font: 600 15px Inter; color: #e9e2d6; text-shadow: 0 2px 8px #000; letter-spacing: .02em; }
+  .cap b { font: 600 22px Oswald; letter-spacing: .06em; text-transform: uppercase; display: block; color: #fff; }
+</style>
+</head>
+<body>
+<div class="view" id="street"></div>
+<div class="view" id="cutaway"></div>
+<div class="view" id="kitchen"></div>
+<div class="view" id="drawing"></div>
+<div class="view" id="loft"></div>
+<div class="view" id="plans"></div>
+<script>
+// ------------------------------------------------------------------ tiny 3D-to-SVG renderer
+// Flat-shaded quads, perspective camera, point lights with soft falloff, fog, painter's sort, fake glow.
+const V = (x, y, z) => ({ x, y, z });
+const add = (a, b) => V(a.x + b.x, a.y + b.y, a.z + b.z);
+const sub = (a, b) => V(a.x - b.x, a.y - b.y, a.z - b.z);
+const mul = (a, k) => V(a.x * k, a.y * k, a.z * k);
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const cross = (a, b) => V(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+const len = (a) => Math.hypot(a.x, a.y, a.z);
+const norm = (a) => mul(a, 1 / (len(a) || 1));
+const lerp3 = (a, b, t) => add(a, mul(sub(b, a), t));
+const hex = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+
+function Scene(o = {}) {
+  return { quads: [], lights: [], glows: [], lines: [], ambient: o.ambient ?? [0.1, 0.1, 0.12], fog: o.fog ?? null, sky: o.sky ?? null, exposure: o.exposure ?? 1.5 };
+}
+function quad(sc, p0, p1, p2, p3, color, o = {}) { sc.quads.push({ p: [p0, p1, p2, p3], c: hex(color), o }); }
+/** Axis box; corners are listed counter-clockwise seen from outside so back faces can be culled. */
+function box(sc, x0, y0, z0, x1, y1, z1, color, o = {}) {
+  const c = (x, y, z) => V(x, y, z);
+  const faces = {
+    front: [c(x0, y0, z1), c(x1, y0, z1), c(x1, y1, z1), c(x0, y1, z1)],
+    back: [c(x1, y0, z0), c(x0, y0, z0), c(x0, y1, z0), c(x1, y1, z0)],
+    left: [c(x0, y0, z0), c(x0, y0, z1), c(x0, y1, z1), c(x0, y1, z0)],
+    right: [c(x1, y0, z1), c(x1, y0, z0), c(x1, y1, z0), c(x1, y1, z1)],
+    top: [c(x0, y1, z1), c(x1, y1, z1), c(x1, y1, z0), c(x0, y1, z0)],
+    bottom: [c(x0, y0, z0), c(x1, y0, z0), c(x1, y0, z1), c(x0, y0, z1)],
+  };
+  for (const [k, f] of Object.entries(faces)) if (!(o.skip || []).includes(k)) quad(sc, ...f, o.colors?.[k] ?? color, o);
+}
+function light(sc, pos, color, intensity, range) { sc.lights.push({ pos, c: hex(color), i: intensity, r: range }); }
+function glow(sc, pos, color, radius, alpha = 0.7) { sc.glows.push({ pos, color, radius, alpha }); }
+function line3(sc, a, b, color, width = 1.5, alpha = 1) { sc.lines.push({ a, b, color, width, alpha }); }
+
+function camera(eye, target, f, w, h) {
+  const fw = norm(sub(target, eye));
+  const right = norm(cross(fw, V(0, 1, 0)));
+  const up = cross(right, fw);
+  return { eye, fw, right, up, f, w, h };
+}
+function project(cam, p) {
+  const d = sub(p, cam.eye);
+  const z = dot(d, cam.fw);
+  if (z < 0.08) return null;
+  return [cam.w / 2 + (cam.f * dot(d, cam.right)) / z, cam.h / 2 - (cam.f * dot(d, cam.up)) / z, z];
+}
+
+function shade(sc, n, c, base, emissive) {
+  let r = sc.ambient[0], g = sc.ambient[1], b = sc.ambient[2];
+  for (const l of sc.lights) {
+    const to = sub(l.pos, c);
+    const d = len(to);
+    const k = Math.max(0, dot(n, mul(to, 1 / (d || 1)))) * l.i / (1 + (d * d) / (l.r * l.r));
+    r += l.c[0] * k; g += l.c[1] * k; b += l.c[2] * k;
+  }
+  const out = [base[0] * r, base[1] * g, base[2] * b];
+  if (emissive) for (let i = 0; i < 3; i++) out[i] += base[i] * emissive;
+  return out;
+}
+
+function render(sc, cam, extra = '') {
+  const polys = [];
+  for (const q of sc.quads) {
+    const [p0, p1, p2, p3] = q.p;
+    const n = norm(cross(sub(p1, p0), sub(p3, p0)));
+    const center = mul(add(add(p0, p1), add(p2, p3)), 0.25);
+    if (!q.o.double && dot(n, sub(center, cam.eye)) >= 0) continue;
+    const nn = q.o.double && dot(n, sub(center, cam.eye)) >= 0 ? mul(n, -1) : n;
+    const s = q.o.sub ?? 0.5;
+    const nu = Math.max(1, Math.min(40, Math.ceil(len(sub(p1, p0)) / s)));
+    const nv = Math.max(1, Math.min(40, Math.ceil(len(sub(p3, p0)) / s)));
+    const at = (u, v) => lerp3(lerp3(p0, p1, u), lerp3(p3, p2, u), v);
+    for (let i = 0; i < nu; i++)
+      for (let j = 0; j < nv; j++) {
+        const cs = [at(i / nu, j / nv), at((i + 1) / nu, j / nv), at((i + 1) / nu, (j + 1) / nv), at(i / nu, (j + 1) / nv)];
+        const pr = cs.map((p) => project(cam, p));
+        if (pr.some((p) => !p)) continue;
+        const c = at((i + 0.5) / nu, (j + 0.5) / nv);
+        let col = shade(sc, nn, c, q.c, q.o.emissive);
+        const depth = (pr[0][2] + pr[1][2] + pr[2][2] + pr[3][2]) / 4;
+        if (sc.fog && !q.o.noFog) {
+          const t = Math.min(1, Math.max(0, (depth - sc.fog.start) / (sc.fog.end - sc.fog.start))) * sc.fog.max;
+          col = col.map((v, k) => v * (1 - t) + sc.fog.c[k] * t);
+        }
+        // Exposure tone mapping: bright lights roll off instead of clipping to white.
+        const rgb = `rgb(${col.map((v) => Math.round((1 - Math.exp(-Math.max(0, v) * sc.exposure)) * 255)).join(',')})`;
+        polys.push({ depth: depth + (q.o.bias ?? 0), pts: pr.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '), rgb, a: q.o.alpha ?? 1 });
+      }
+  }
+  polys.sort((a, b) => b.depth - a.depth);
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cam.w}" height="${cam.h}" viewBox="0 0 ${cam.w} ${cam.h}"><defs>`;
+  sc.glows.forEach((g, i) => (svg += `<radialGradient id="g${i}"><stop offset="0" stop-color="${g.color}" stop-opacity="${g.alpha}"/><stop offset="1" stop-color="${g.color}" stop-opacity="0"/></radialGradient>`));
+  svg += `</defs>`;
+  if (sc.sky) svg += sc.sky(cam);
+  for (const p of polys) svg += `<polygon points="${p.pts}" fill="${p.rgb}" stroke="${p.rgb}" stroke-width="0.7"${p.a < 1 ? ` fill-opacity="${p.a}" stroke-opacity="${p.a}"` : ''}/>`;
+  for (const l of sc.lines) {
+    const a = project(cam, l.a), b = project(cam, l.b);
+    if (a && b) svg += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${l.color}" stroke-width="${l.width}" stroke-opacity="${l.alpha}" stroke-linecap="round"/>`;
+  }
+  sc.glows.forEach((g, i) => {
+    const p = project(cam, g.pos);
+    if (p) svg += `<circle cx="${p[0]}" cy="${p[1]}" r="${(g.radius * cam.f) / p[2]}" fill="url(#g${i})" style="mix-blend-mode:screen"/>`;
+  });
+  return svg + extra + '</svg>';
+}
+
+// ------------------------------------------------------------------ shared props
+const PAL = {
+  brick: '#6a3a2c', stucco: '#d8d0c0', slate: '#3a3f48', sash: '#e6e0d4', board: '#6b4a2b', iron: '#16181c',
+  basement: '#8a4a38', ground: '#3f5a46', first: '#2f4466', second: '#a89a62', attic: '#7a6248',
+  floorWood: '#5a3e2a', floorTile: '#6e6a62', skin: '#6e7b5c', shirt: '#3b3a45', pants: '#2a2a33',
+};
+const SODIUM = '#ffa040', LAMP = '#ffc884', MOON = '#9fb4d8';
+
+function zombie(sc, x, y, z, s = 1, face = 0, lean = 0) {
+  const k = (v) => v * s;
+  const r = (dx, dz) => { const c = Math.cos(face), sn = Math.sin(face); return [x + dx * c - dz * sn, z + dx * sn + dz * c]; };
+  const part = (dx0, y0, dz0, dx1, y1, dz1, col) => {
+    const [ax, az] = r(k(dx0), k(dz0)), [bx, bz] = r(k(dx1), k(dz1));
+    box(sc, Math.min(ax, bx), y + k(y0), Math.min(az, bz), Math.max(ax, bx), y + k(y1), Math.max(az, bz), col, { sub: 0.3 });
+  };
+  part(-0.2, 0, -0.1, -0.03, 0.8, 0.1, PAL.pants);
+  part(0.03, 0, -0.1, 0.2, 0.8, 0.1, PAL.pants);
+  part(-0.25, 0.8 + lean * 0.1, -0.14, 0.25, 1.42, 0.14, PAL.shirt);
+  part(-0.32, 1.25, 0.1, -0.2, 1.37, 0.6, PAL.skin);
+  part(0.2, 1.28, 0.1, 0.32, 1.4, 0.62, PAL.skin);
+  part(-0.15, 1.42, -0.12 + lean * 0.15, 0.15, 1.74, 0.18 + lean * 0.15, PAL.skin);
+  const [ex1, ez1] = r(k(-0.07), k(0.19 + lean * 0.15)), [ex2, ez2] = r(k(0.07), k(0.19 + lean * 0.15));
+  glow(sc, V(ex1, y + k(1.62), ez1), '#ffe060', 0.05 * s, 0.95);
+  glow(sc, V(ex2, y + k(1.62), ez2), '#ffe060', 0.05 * s, 0.95);
+}
+function player(sc, x, y, z, s = 1, stripe = '#3a6ea5') {
+  box(sc, x - 0.2, y, z - 0.1, x - 0.03, y + 0.8, z + 0.1, '#22262e');
+  box(sc, x + 0.03, y, z - 0.1, x + 0.2, y + 0.8, z + 0.1, '#22262e');
+  box(sc, x - 0.25, y + 0.8, z - 0.15, x + 0.25, y + 1.42, z + 0.15, '#2e3440');
+  box(sc, x - 0.26, y + 1.15, z - 0.16, x + 0.26, y + 1.25, z + 0.16, stripe);
+  box(sc, x - 0.14, y + 1.42, z - 0.14, x + 0.14, y + 1.72, z + 0.14, '#c8a27c');
+  box(sc, x - 0.04, y + 1.2, z - 0.7, x + 0.04, y + 1.3, z - 0.1, '#1b1c1f');
+}
+function boards(sc, x0, x1, y0, y1, z, n, o = {}) {
+  for (let i = 0; i < n; i++) {
+    const y = y0 + ((y1 - y0) * (i + 0.5)) / n;
+    const tilt = (i % 2 ? 1 : -1) * 0.08;
+    quad(sc, V(x0 - 0.1, y - 0.07 + tilt, z), V(x1 + 0.1, y - 0.07 - tilt, z), V(x1 + 0.1, y + 0.07 - tilt, z), V(x0 - 0.1, y + 0.07 + tilt, z), PAL.board, { double: true, sub: 0.4, bias: -0.05, ...o });
+  }
+}
+function lampPost(sc, x, z) {
+  box(sc, x - 0.07, 0, z - 0.07, x + 0.07, 4.6, z + 0.07, PAL.iron);
+  box(sc, x - 0.22, 4.5, z - 0.22, x + 0.22, 4.8, z + 0.22, '#ffd08a', { emissive: 3 });
+  light(sc, V(x, 4.4, z), SODIUM, 3.2, 6);
+  glow(sc, V(x, 4.6, z), SODIUM, 1.4, 0.55);
+  glow(sc, V(x, 4.6, z), '#ffe0a0', 0.35, 0.9);
+}
+const rain = (w, h, n, seed = 3) => {
+  let s = seed, out = '';
+  const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < n; i++) { const x = r() * w, y = r() * h, l = 10 + r() * 16; out += `<line x1="${x}" y1="${y}" x2="${x - 3}" y2="${y + l}" stroke="#9fb4d8" stroke-opacity="${0.12 + r() * 0.2}" stroke-width="1"/>`; }
+  return out;
+};
+const vignette = (w, h, a = 0.75) => `<defs><radialGradient id="vg" cx="50%" cy="50%" r="75%"><stop offset="0.55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="${a}"/></radialGradient></defs><rect width="${w}" height="${h}" fill="url(#vg)"/>`;
+const caption = (title, sub) => `<div class="cap"><b>${title}</b>${sub}</div>`;
+const skyGrad = (top, bottom) => (cam) => `<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bottom}"/></linearGradient></defs><rect width="${cam.w}" height="${cam.h}" fill="url(#sky)"/>`;
+
+// ------------------------------------------------------------------ the house (shared by street and cutaway)
+// x: 0..6 across (left party wall to right), z: 0 front facade .. -12 back, y: floors at -3, 0, 3, 6, 9.
+const FLOORS = [
+  { y: -3, wall: PAL.basement, floor: PAL.floorTile },
+  { y: 0, wall: PAL.ground, floor: PAL.floorWood },
+  { y: 3, wall: PAL.first, floor: PAL.floorWood },
+  { y: 6, wall: PAL.second, floor: PAL.floorWood },
+  { y: 9, wall: PAL.attic, floor: '#6a5038' },
+];
+
+function stairsFlight(sc, x0, x1, zTop, zBottom, yBottom, rise, color = '#5a3c26') {
+  const n = 12, depth = (zTop - zBottom) / n;
+  for (let i = 0; i < n; i++)
+    box(sc, x0, yBottom - 0.2, zBottom + depth * i, x1, yBottom + (rise * (i + 1)) / n, zBottom + depth * (i + 1), color, { sub: 0.6 });
+}
+
+function houseInterior(sc, o = {}) {
+  // Floor slabs and ceilings with stairwell holes (kept simple: full slabs except the hole above each up-flight).
+  const holes = { 0: null, 1: [5, 8], 2: [9, 12], 3: [4, 7], 4: [9, 12] }; // z cells (1..12 from front) open from below
+  FLOORS.forEach((f, i) => {
+    const hz = holes[i];
+    const slab = (z0, z1) => box(sc, 0, f.y - 0.25, -z1, 6, f.y, -z0, f.floor, { sub: 0.6, skip: ['bottom'] });
+    if (hz) { slab(0, hz[0] - 1); slab(hz[1], 12); box(sc, 2, f.y - 0.25, -(hz[1]), 6, f.y, -(hz[0] - 1), f.floor, { sub: 0.6, skip: ['bottom'] }); }
+    else slab(0, 12);
+    const h = i === 4 ? 2.5 : 3;
+    // Party walls, back wall: inside faces only matter.
+    box(sc, -0.3, f.y, -12, 0, f.y + h, 0, f.wall, { sub: 0.6 });
+    box(sc, 6, f.y, -12, 6.3, f.y + h, 0, f.wall, { sub: 0.6 });
+    box(sc, 0, f.y, -12.3, 6, f.y + h, -12, f.wall, { sub: 0.6 });
+    // Stair lane edge rail on every floor.
+    box(sc, 1.95, f.y, -(hz ? hz[1] : 8), 2.05, f.y + 1, -(hz ? hz[0] - 1 : 4), '#3a2616');
+  });
+  // Up-flights (z in metres, negative into the house).
+  stairsFlight(sc, 0, 2, -4, -8, -3, 3);
+  stairsFlight(sc, 0, 2, -8, -12, 0, 3);
+  stairsFlight(sc, 0, 2, -3, -7, 3, 3);
+  stairsFlight(sc, 0, 2, -8, -12, 6, 3);
+  // Room partitions (2 m doorways left open).
+  const wallZ = (y, z, x0, x1, col) => box(sc, x0, y, z - 0.08, x1, y + 3, z + 0.08, col, { sub: 0.6 });
+  wallZ(-3, -6, 2, 4, PAL.basement); wallZ(0, -6, 2, 4, PAL.ground); wallZ(3, -7, 4, 6, PAL.first);
+  wallZ(6, -5, 4, 6, PAL.second); wallZ(6, -8, 2, 4, PAL.second);
+  // Back windows, lit by moon, boarded.
+  FLOORS.slice(0, 4).forEach((f) => {
+    box(sc, 3.1, f.y + 0.9, -12.02, 4.9, f.y + 2.4, -11.98, '#2b3c5a', { emissive: 0.6 });
+    boards(sc, 3.1, 4.9, f.y + 1, f.y + 2.3, -11.9, 4);
+  });
+  // Lights: one warm bulb per room.
+  [[4.5, -1.2, -3], [4.5, -1.2, -9], [4.5, 1.8, -3], [4, 1.8, -9], [4.5, 4.8, -3.5], [4, 4.8, -10], [4.5, 7.8, -2.5], [4.5, 7.8, -10], [3, 10.7, -4]].forEach(([x, y, z], i) => {
+    light(sc, V(x, y + 1, z), LAMP, i === 8 ? 1.2 : 2.2, 4.5);
+    box(sc, x - 0.08, y + 1.05, z - 0.08, x + 0.08, y + 1.2, z + 0.08, '#ffe6b0', { emissive: 4 });
+    glow(sc, V(x, y + 1.1, z), LAMP, 0.6, 0.6);
+  });
+  // Furniture.
+  const F = (x0, y0, z0, x1, y1, z1, c, oo) => box(sc, x0, y0, -z1, x1, y1, -z0, c, { sub: 0.4, ...oo });
+  // Basement: kitchen cooker, table, sink; scullery mangle; vault.
+  F(5.2, -3, 1.2, 5.9, -2.1, 2.4, '#20242a'); box(sc, 5.3, -2.1, -2.3, 5.8, -2.05, -1.3, '#3060ff', { emissive: 2 });
+  F(3.6, -3, 3, 5, -2.2, 4.6, '#6b4a2b'); F(3.1, -3, 0.2, 4.4, -2.1, 0.8, '#d8d4cc');
+  F(4.4, -3, 9, 5.4, -1.9, 10, '#4a4a48');
+  // Ground: parlour sofa + fireplace, dining table.
+  F(3.2, 0, 3.6, 5.6, 0.75, 4.4, '#5a2a2a'); F(5.7, 0, 1.6, 6, 1.4, 3.4, '#2a2420'); box(sc, 5.6, 0.1, -3, 5.75, 0.6, -2, '#ff7a30', { emissive: 2.5 });
+  light(sc, V(5.4, 0.4, -2.5), '#ff7a30', 1.4, 2.5); glow(sc, V(5.6, 0.4, -2.5), '#ff7a30', 0.6, 0.7);
+  F(3.2, 0, 8, 5.2, 0.8, 11, '#4a2e1c');
+  // First: piano, sofas, chandelier.
+  F(2.6, 3, 1, 4, 4, 2.4, '#111214'); F(4.4, 3, 4.6, 5.9, 3.75, 6.4, '#283a60');
+  box(sc, 3.8, 5.3, -3.9, 4.6, 5.6, -3.1, '#ffe6a0', { emissive: 3 }); glow(sc, V(4.2, 5.4, -3.5), LAMP, 0.9, 0.6);
+  F(3.2, 3, 9.6, 4.6, 3.8, 10.6, '#4a2e1c'); F(5.4, 3, 8, 6, 5.2, 12, '#3a281c');
+  // Second: beds, bath.
+  F(3.6, 6, 1.2, 5.6, 6.6, 3.4, '#c8c0b0'); F(4.2, 6, 5.4, 5.9, 6.6, 6.6, '#e8e8ec'); F(3.6, 6, 9.4, 5.6, 6.9, 11.6, '#7a4a3a');
+  // Tough Juice and Quick Hands machines glow.
+  F(2.4, 6, 5.3, 3.1, 8, 6, '#5a0d10'); box(sc, 2.45, 7.4, -5.95, 3.05, 7.8, -5.3, '#ff4a40', { emissive: 2.5 }); light(sc, V(2.7, 7.5, -5.6), '#ff4a40', 0.9, 2);
+  F(5.1, 9, 10.8, 5.8, 11, 11.5, '#0b4a4a'); box(sc, 5.15, 10.4, -11.45, 5.75, 10.8, -10.8, '#2ec4b6', { emissive: 2.5 }); light(sc, V(5.4, 10.5, -11), '#2ec4b6', 0.9, 2);
+  // Attic: water tank, trunks.
+  F(0.4, 9, 1, 1.8, 10.2, 2.4, '#4a5258'); F(3.4, 9, 9.4, 4.4, 9.5, 10, '#5a3b26'); F(3.5, 9, 10.4, 4.5, 9.4, 11.2, '#4a3020');
+  // Mystery box glow in the scullery.
+  F(3.3, -3, 10.6, 4.2, -2.4, 11.2, '#5a3b26'); glow(sc, V(3.75, -2.2, -10.9), '#e8b84a', 0.8, 0.6); light(sc, V(3.75, -2.1, -10.9), '#e8b84a', 1, 2);
+  if (o.actors) {
+    zombie(sc, 4, -3, -11.2, 1, Math.PI); zombie(sc, 3, 0, -10.6, 1, 2.6);
+    zombie(sc, 3.4, 3, -11.3, 1, Math.PI, 0.6); zombie(sc, 4.6, -3, -4.2, 1, 3.5);
+    player(sc, 1, 1.6, -9.6, 1, '#3a6ea5'); player(sc, 4.4, 3, -4, 1, '#a5543a'); player(sc, 3, 6, -10, 1, '#3aa56e');
+  }
+}
+
+function roof(sc) {
+  // Pitched slate roof over the attic (front and back slopes), chimney stacks on the party walls.
+  const e = 11.5;
+  quad(sc, V(-0.3, 9 + 2.5, -12.3), V(6.3, 9 + 2.5, -12.3), V(6.3, e + 1.2, -6), V(-0.3, e + 1.2, -6), PAL.slate, { sub: 0.8 });
+  box(sc, 5.8, 9, -7, 6.6, e + 2.4, -5.6, '#5a3328');
+}
+
+// ------------------------------------------------------------------ scenes
+const W = 1280, H = 720;
+const views = {
+  street() {
+    const sc = Scene({ ambient: [0.05, 0.055, 0.08], fog: { c: [0.06, 0.07, 0.1], start: 14, end: 60, max: 0.85 }, sky: skyGrad('#05070c', '#1a2234') });
+    // Road, pavement, kerb.
+    box(sc, -40, -0.25, 0, 46, -0.15, 16, '#15171b', { sub: 1.4 });
+    box(sc, -40, -0.15, 0, 46, 0, 4.2, '#3a3c40', { sub: 1.2 });
+    box(sc, -40, -0.15, 4.2, 46, 0.05, 4.4, '#55575c');
+    [[2, 9], [9, 11], [-6, 8], [14, 9.5]].forEach(([x, z]) => box(sc, x - 1.6, -0.15, z - 0.6, x + 1.6, -0.149, z + 0.6, '#2a2f38', { emissive: 0.4 }));
+    // Terrace: 5 houses, ours in the middle (x 0..6).
+    for (let h = -2; h <= 2; h++) {
+      const x = h * 6, ours = h === 0;
+      box(sc, x, 0, -12, x + 6, 12, 0, PAL.brick, { sub: 0.8, colors: { front: ours ? '#7a4434' : PAL.brick } });
+      box(sc, x, 0, -0.02, x + 6, 3.2, 0.12, PAL.stucco, { sub: 0.6 }); // stucco ground floor
+      quad(sc, V(x, 12, 0.3), V(x + 6, 12, 0.3), V(x + 6, 14.4, -5), V(x, 14.4, -5), PAL.slate, { sub: 0.8 });
+      box(sc, x + 5.6, 12, -2, x + 6.4, 15.6, -1, '#5a3328');
+      // Windows per floor: lit warm or dark.
+      const lit = (fl, i) => ((h + 2) * 7 + fl * 3 + i) % 4 !== 0;
+      for (let fl = 0; fl < 4; fl++) {
+        const y = fl * 3 + (fl === 0 ? 0.9 : 0.8);
+        for (const [wx0, wx1] of fl === 0 ? [[3.2, 5.6]] : [[1, 2.4], [3.6, 5]]) {
+          const on = ours || lit(fl, wx0);
+          box(sc, x + wx0, y, 0.12, x + wx1, y + (fl === 1 ? 2 : 1.6), 0.14, on ? '#ffb860' : '#141a24', { emissive: on ? 1.6 : 0.2 });
+          box(sc, x + wx0 - 0.1, y - 0.12, 0.12, x + wx1 + 0.1, y, 0.3, PAL.sash);
+          if (on) light(sc, V(x + (wx0 + wx1) / 2, y + 0.8, 0.8), '#ffb060', ours ? 0.9 : 0.5, 2.2);
+        }
+      }
+      // Front door and steps; lightwell with railings.
+      box(sc, x + 0.6, 0.3, 0.12, x + 1.8, 2.6, 0.16, ours ? '#1c2a22' : '#2a1c1c');
+      box(sc, x + 0.4, 0, 0, x + 2, 0.3, 1.2, '#8a8680');
+      box(sc, x + 2.2, -3, 0.12, x + 6, 0, 1.6, '#0c0e12', { skip: ['top'] });
+      for (let r = 0; r < 14; r++) box(sc, x + 2.2 + r * 0.28, 0, 1.55, x + 2.24 + r * 0.28, 1.1, 1.6, PAL.iron);
+      box(sc, x + 2.2, 1.05, 1.53, x + 6, 1.12, 1.62, PAL.iron);
+      // 1st floor balcony.
+      box(sc, x + 0.6, 3, 0.12, x + 5.4, 3.12, 0.9, '#c8c0b0');
+      for (let r = 0; r < 18; r++) box(sc, x + 0.6 + r * 0.27, 3.12, 0.85, x + 0.63 + r * 0.27, 4, 0.9, PAL.iron);
+    }
+    // Our house: boarded windows and the front door barricade.
+    boards(sc, 3.2, 5.6, 1, 2.6, 0.3, 4);
+    boards(sc, 0.6, 1.8, 0.4, 2.5, 0.3, 6, { emissive: 0 });
+    boards(sc, 1, 2.4, 3.9, 5.3, 0.3, 3); boards(sc, 3.6, 5, 3.9, 5.3, 0.3, 2);
+    boards(sc, 3.6, 5, 7, 8.2, 0.3, 4);
+    // Lightwell window glow below street.
+    box(sc, 3.6, -2.2, 0.1, 5.2, -0.8, 0.14, '#ffb060', { emissive: 1.6 }); light(sc, V(4.4, -1, 1), '#ffb060', 1, 2);
+    // Street lamps and a parked car.
+    lampPost(sc, -3, 3.6); lampPost(sc, 9, 3.6); lampPost(sc, 21, 3.6);
+    box(sc, 7.5, 0.2, 5, 11.6, 1.1, 6.8, '#4a6a8a'); box(sc, 8.3, 1.1, 5.1, 10.6, 1.7, 6.7, '#1c2630'); box(sc, 8.4, 1.15, 5.08, 10.5, 1.65, 5.1, '#3a5a7a', { emissive: 0.3 });
+    // Zombies: on the pavement, at the lightwell, climbing to the balcony.
+    zombie(sc, -1.5, 0, 2.6, 1, -2.4); zombie(sc, 1.2, 0, 2.2, 1, Math.PI + 0.3, 0.3); zombie(sc, 4.3, -3, 0.9, 1, Math.PI);
+    zombie(sc, 5.2, 1.6, 0.9, 1, Math.PI, 0.5); zombie(sc, 13, 0, 6.5, 1, -1.2); zombie(sc, -8, 0, 7, 1, 1.1);
+    const cam = camera(V(4.5, 1.7, 17), V(3.4, 4.6, 0), 760, W, H);
+    return render(sc, cam, rain(W, H, 420) + vignette(W, H)) + caption('The street', 'Five ways in. Zombies come along the pavement, down the lightwell and up the balcony railings.');
+  },
+
+  cutaway() {
+    const sc = Scene({ ambient: [0.06, 0.06, 0.08], fog: { c: [0.03, 0.035, 0.05], start: 30, end: 60, max: 0.6 }, sky: skyGrad('#04060a', '#121a28') });
+    houseInterior(sc, { actors: true });
+    roof(sc);
+    // Neighbours as dark solid blocks on both sides, street and garden ground.
+    box(sc, -12, -3.45, -26, 18, -3.25, 10, '#16191c', { sub: 2 });
+    // Cut edge of the front facade on every floor so the dollhouse reads as a section.
+    FLOORS.forEach((f) => box(sc, -0.3, f.y - 0.3, -0.05, 6.3, f.y, 0.25, '#c8b8a0', { sub: 1 }));
+    const labels = [['Basement', 'kitchen, scullery, coal vault', -1.5], ['Ground', 'hall, parlour, dining room', 1.5], ['1st', 'drawing room, study', 4.5], ['2nd', 'bedrooms, bathroom', 7.5], ['Attic', 'loft, box room', 10.3]];
+    const cam = camera(V(-3.5, 8, 14), V(3, 3.2, -6), 760, W, 900);
+    let tags = '';
+    for (const [name, rooms, y] of labels) {
+      const p = project(cam, V(6.6, y, 0.3));
+      if (p) tags += `<g font-family="Inter" text-anchor="start"><text x="${p[0] + 12}" y="${p[1]}" fill="#f2eee6" font-family="Oswald" font-size="22" letter-spacing="1">${name.toUpperCase()}</text><text x="${p[0] + 12}" y="${p[1] + 20}" fill="#b8b0a4" font-size="14">${rooms}</text></g>`;
+    }
+    return render(sc, cam, tags + vignette(W, 900, 0.6)) + caption('The house, front wall removed', 'Five floors, one stair along the left wall. Each floor has its own colour so you always know where you are.');
+  },
+
+  kitchen() {
+    const sc = Scene({ ambient: [0.07, 0.06, 0.06] });
+    // Basement kitchen, looking from the back of the kitchen towards the lightwell window (front).
+    const y = 0; // local floor
+    box(sc, 0, y - 0.2, -7, 4.2, y, 0.5, PAL.floorTile, { sub: 0.4 });
+    box(sc, 0, y + 3, -7, 4.2, y + 3.2, 0.5, '#3a2a22', { sub: 0.6 });
+    box(sc, -0.2, y, -7, 0, y + 3, 0.5, PAL.basement, { sub: 0.4 });
+    box(sc, 4.2, y, -7, 4.4, y + 3, 0.5, PAL.basement, { sub: 0.4 });
+    box(sc, 0, y, -7.2, 4.2, y + 3, -7, PAL.basement, { sub: 0.3 });
+    // Lightwell window: night outside, boards, zombie behind.
+    box(sc, 1.3, y + 1.6, -7.05, 3, y + 2.9, -7.01, '#1a2436', { emissive: 0.8 });
+    zombie(sc, 2.1, y + 1.1, -7.8, 0.9, 0, 0.2);
+    boards(sc, 1.3, 3, y + 1.7, y + 2.8, -6.95, 4);
+    // Cooker with the gas trap, sink, table, dresser, dumbwaiter hatch.
+    box(sc, 3.2, y, -5.6, 4.2, y + 0.9, -3.8, '#22262c', { sub: 0.3 });
+    box(sc, 3.3, y + 0.9, -5.4, 4.1, y + 0.95, -4, '#2a2e34');
+    for (const [bx, bz] of [[3.5, -5.1], [3.9, -5.1], [3.5, -4.4], [3.9, -4.4]]) { box(sc, bx - 0.12, y + 0.95, bz - 0.12, bx + 0.12, y + 0.98, bz + 0.12, '#3060ff', { emissive: 2.5 }); glow(sc, V(bx, y + 1, bz), '#5080ff', 0.2, 0.7); }
+    light(sc, V(3.7, y + 1.3, -4.7), '#4070ff', 1.1, 1.6);
+    box(sc, 0, y, -6.5, 1.1, y + 0.9, -5, '#d8d4cc'); box(sc, 0.05, y + 0.9, -6.4, 1, y + 0.95, -5.1, '#8a8a8a');
+    box(sc, 1.4, y, -3.6, 2.8, y + 0.8, -2.2, '#6b4a2b', { sub: 0.3 });
+    box(sc, 0, y, -2, 0.5, y + 2.2, -0.2, '#4a3020', { sub: 0.3 });
+    for (let s = 0; s < 3; s++) box(sc, 0.02, y + 1.1 + s * 0.38, -1.9, 0.52, y + 1.14 + s * 0.38, -0.3, '#3a2616');
+    box(sc, 4.15, y + 1, -2.2, 4.2, y + 1.9, -1.4, '#2a2420');
+    // Hanging bulb.
+    light(sc, V(2.1, y + 2.4, -3.5), LAMP, 2.6, 4);
+    box(sc, 2.04, y + 2.45, -3.56, 2.16, y + 2.6, -3.44, '#ffe6b0', { emissive: 4 }); glow(sc, V(2.1, y + 2.5, -3.5), LAMP, 0.8, 0.6);
+    const cam = camera(V(2.2, 1.6, 0.3), V(2.2, 1.45, -6), 700, W, H);
+    const pr = (p) => project(cam, p);
+    const a = pr(V(3.7, 1.25, -4.7));
+    const tag = a ? `<g font-family="Inter"><line x1="${a[0]}" y1="${a[1]}" x2="${a[0] + 80}" y2="${a[1] - 60}" stroke="#e8b84a" stroke-width="1.5"/><text x="${a[0] + 86}" y="${a[1] - 64}" fill="#e8b84a" font-size="15" font-weight="600">Gas cooker trap · 1000</text></g>` : '';
+    const prompt = `<g font-family="Inter" font-weight="600" font-size="20" fill="#f2eee6" style="paint-order:stroke" stroke="#000" stroke-width="4"><rect x="512" y="497" width="28" height="26" rx="4" fill="none" stroke="#f2eee6" stroke-width="2"/><text x="526" y="516" text-anchor="middle" font-size="16" stroke-width="0">E</text><text x="550" y="518">Light the gas <tspan fill="#e8b84a">1,000</tspan></text></g>`;
+    return render(sc, cam, prompt + tag + vignette(W, H)) + caption('Basement kitchen', 'Lure them down, light the gas, run for the stairs.');
+  },
+
+  drawing() {
+    const sc = Scene({ ambient: [0.06, 0.06, 0.09] });
+    const y = 0;
+    box(sc, 0, y - 0.2, -7.5, 4.4, y, 0.5, PAL.floorWood, { sub: 0.4 });
+    box(sc, 0, y + 3.2, -7.5, 4.4, y + 3.4, 0.5, '#d8d0c4', { sub: 0.6 });
+    box(sc, -0.2, y, -7.5, 0, y + 3.2, 0.5, PAL.first, { sub: 0.4 });
+    box(sc, 4.4, y, -7.5, 4.6, y + 3.2, 0.5, PAL.first, { sub: 0.4 });
+    box(sc, 0, y, -7.7, 4.4, y + 3.2, -7.5, PAL.first, { sub: 0.3 });
+    // Dado rail and skirting.
+    for (const [x0, x1, z0, z1] of [[0, 0.02, -7.5, 0.5], [4.38, 4.4, -7.5, 0.5], [0, 4.4, -7.5, -7.48]]) { box(sc, x0, y + 0.95, z0, x1 + 0.02, y + 1.02, z1, '#c8b890'); }
+    // Balcony doors (street side), orange sodium glow, boards, a zombie on the balcony.
+    for (const dx of [0.6, 2.6]) {
+      box(sc, dx, y + 0.1, -7.55, dx + 1.2, y + 2.7, -7.51, '#40281a', { emissive: 0.3 });
+      box(sc, dx + 0.08, y + 0.2, -7.53, dx + 1.12, y + 2.6, -7.505, '#ff9a40', { emissive: 1.2 });
+    }
+    light(sc, V(2.2, y + 1.5, -7.2), SODIUM, 1.4, 3.5);
+    zombie(sc, 3.2, y, -8.2, 1, 0, 0.3);
+    boards(sc, 2.6, 3.8, y + 0.5, y + 2.4, -7.45, 5);
+    boards(sc, 0.6, 1.8, y + 0.5, y + 2.4, -7.45, 3);
+    // Piano, sofa, fireplace, chandelier, Ripper chalk.
+    box(sc, 0, y, -3.8, 1.3, y + 1.05, -2.1, '#0e0f12', { sub: 0.3, colors: { top: '#18191d' } });
+    box(sc, 3, y, -4.8, 4.3, y + 0.75, -2.6, '#283a60', { sub: 0.3 }); box(sc, 4, y + 0.75, -4.8, 4.3, y + 1.3, -2.6, '#22324f');
+    box(sc, 4.25, y, -1.4, 4.4, y + 1.2, -0.2, '#2a2420'); box(sc, 4.2, y + 0.15, -1.1, 4.3, y + 0.7, -0.5, '#ff7a30', { emissive: 2.4 });
+    light(sc, V(3.9, y + 0.5, -0.8), '#ff7a30', 1.4, 2.4);
+    light(sc, V(2.2, y + 2.7, -3.8), LAMP, 2.4, 4.5);
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; box(sc, 2.2 + Math.cos(a) * 0.35 - 0.04, y + 2.62, -3.8 + Math.sin(a) * 0.35 - 0.04, 2.2 + Math.cos(a) * 0.35 + 0.04, y + 2.74, -3.8 + Math.sin(a) * 0.35 + 0.04, '#ffe6a0', { emissive: 4 }); glow(sc, V(2.2 + Math.cos(a) * 0.35, y + 2.7, -3.8 + Math.sin(a) * 0.35), LAMP, 0.25, 0.8); }
+    line3(sc, V(2.2, y + 3.2, -3.8), V(2.2, y + 2.75, -3.8), '#3a3020', 2);
+    const cam = camera(V(1.6, 1.6, 0.2), V(2.4, 1.5, -6.5), 680, W, H);
+    // Ripper chalk outline on the left wall.
+    const pts = [[0, 0], [1, 0], [1, 0.12], [0.75, 0.12], [0.68, 0.36], [0.56, 0.36], [0.6, 0.12], [0.36, 0.12], [0.3, 0.24], [0.18, 0.24], [0.22, 0.12], [0, 0.12]];
+    const chalk = pts.map(([u, v]) => project(cam, V(0.01, y + 1.75 - v * 0.9, -3.4 - u * 1.4))).filter(Boolean).map((p) => `${p[0]},${p[1]}`).join(' ');
+    return render(sc, cam, `<polygon points="${chalk}" fill="none" stroke="#e8e2d0" stroke-width="2.5" stroke-opacity=".85"/>` + vignette(W, H)) + caption('1st floor drawing room', 'The biggest room in the house. Balcony doors to the street, the Ripper on the wall.');
+  },
+
+  loft() {
+    const sc = Scene({ ambient: [0.05, 0.055, 0.075] });
+    const y = 0;
+    box(sc, 0, y - 0.2, -7, 6, y, 0.5, '#6a5038', { sub: 0.4 });
+    // Sloped ceiling: two slopes meeting at a ridge, low at the sides.
+    quad(sc, V(0, y + 1.1, 0.5), V(0, y + 1.1, -7), V(2.2, y + 2.5, -7), V(2.2, y + 2.5, 0.5), PAL.attic, { sub: 0.4, double: true });
+    quad(sc, V(6, y + 1.1, -7), V(6, y + 1.1, 0.5), V(3.8, y + 2.5, 0.5), V(3.8, y + 2.5, -7), PAL.attic, { sub: 0.4, double: true });
+    box(sc, 2.2, y + 2.5, -7, 3.8, y + 2.6, 0.5, '#5a4636', { sub: 0.5 });
+    box(sc, 0, y, -7.2, 6, y + 2.6, -7, PAL.attic, { sub: 0.4 });
+    box(sc, -0.2, y, -7, 0, y + 1.1, 0.5, PAL.attic); box(sc, 6, y, -7, 6.2, y + 1.1, 0.5, PAL.attic);
+    // Rafters.
+    for (let z = 0; z > -7; z -= 0.9) { box(sc, 0.1, y + 1.1, z - 0.08, 2.2, y + 1.18, z, '#3a2a1c'); }
+    // Skylight in the flat ridge strip with boards and a zombie looking down; moonlight shaft.
+    box(sc, 2.4, y + 2.58, -4.6, 3.6, y + 2.6, -3.4, '#3a4c70', { emissive: 1.4 });
+    zombie(sc, 3, y + 2.62, -4, 0.8, 0, 0.9);
+    for (let i = 0; i < 3; i++) quad(sc, V(2.3, y + 2.55, -4.5 + i * 0.4), V(3.7, y + 2.55, -4.5 + i * 0.4), V(3.7, y + 2.55, -4.32 + i * 0.4), V(2.3, y + 2.55, -4.32 + i * 0.4), PAL.board, { double: true });
+    light(sc, V(3, y + 2.4, -4), MOON, 1.6, 3.2);
+    // Water tank, trunks, Quick Hands glow from the box room door, dormer at the back.
+    box(sc, 0.3, y, -2.4, 1.6, y + 1.1, -1, '#4a5258', { sub: 0.3 });
+    box(sc, 4.4, y, -3.2, 5.4, y + 0.55, -2.4, '#5a3b26'); box(sc, 4.5, y, -1.9, 5.5, y + 0.45, -1.2, '#4a3020');
+    box(sc, 4.8, y, -6.9, 5.6, y + 1.9, -6.2, '#0b4a4a'); box(sc, 4.85, y + 1.3, -6.25, 5.55, y + 1.7, -6.2, '#2ec4b6', { emissive: 2.6 }); light(sc, V(5.2, y + 1.4, -5.8), '#2ec4b6', 1.2, 2.5); glow(sc, V(5.2, y + 1.5, -6.1), '#2ec4b6', 0.6, 0.5);
+    box(sc, 2.4, y + 0.9, -7.05, 3.6, y + 2.1, -7.01, '#1a2436', { emissive: 0.7 }); boards(sc, 2.4, 3.6, y + 1, y + 2, -6.95, 3);
+    light(sc, V(1.4, y + 1.6, -1.4), LAMP, 0.9, 2.5);
+    const cam = camera(V(3, 1.5, 0.3), V(3, 1.6, -6), 640, W, H);
+    // Shaft of moonlight from the skylight.
+    const s = [V(2.4, y + 2.58, -4.6), V(3.6, y + 2.58, -4.6), V(3.9, y, -3.8), V(2.1, y, -3.8)].map((p) => project(cam, p));
+    const shaft = s.every(Boolean) ? `<polygon points="${s.map((p) => `${p[0]},${p[1]}`).join(' ')}" fill="#9fb4d8" fill-opacity="0.12"/>` : '';
+    return render(sc, cam, shaft + vignette(W, H, 0.85)) + caption('The loft', 'Low, dark, and the only room with a way in from above: listen for footsteps on the slates.');
+  },
+
+  plans() {
+    // Furnished top-down plans with light pools: 2D, drawn directly.
+    const C = 34, X = (i) => 40 + i * 248, Y0 = 110;
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="620" viewBox="0 0 ${W} 620"><defs><radialGradient id="pool"><stop offset="0" stop-color="#ffc884" stop-opacity=".55"/><stop offset="1" stop-color="#ffc884" stop-opacity="0"/></radialGradient><radialGradient id="cold"><stop offset="0" stop-color="#9fb4d8" stop-opacity=".35"/><stop offset="1" stop-color="#9fb4d8" stop-opacity="0"/></radialGradient><pattern id="steps" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#5a3c26"/><line x1="0" y1="7" x2="8" y2="7" stroke="#2a1a10" stroke-width="2"/></pattern></defs><rect width="${W}" height="620" fill="#0e1014"/>`;
+    s += `<text x="40" y="50" fill="#f2eee6" font-family="Oswald" font-size="30" letter-spacing="2">THE TOWNHOUSE · FLOOR PLANS</text><text x="40" y="76" fill="#9a9389" font-family="Inter" font-size="15">Street at the top of each plan. 1 square = 1 m. Warm pools are lamps; blue is moonlight through windows.</text>`;
+    const floors = [
+      { name: 'Basement · 750', col: PAL.basement, rooms: [[1, 1, 2, 4, 'Vault'], [3, 1, 6, 6, 'Kitchen'], [3, 7, 5, 12, 'Scullery'], [1, 9, 2, 12, 'Store']], up: [1, 5, 2, 8], back: [6, 7, 6, 12],
+        furn: [[5.2, 1.2, 0.7, 1.2, '#20242a'], [3.6, 3, 1.4, 1.6, '#6b4a2b'], [3.1, 0.2, 1.3, 0.6, '#d8d4cc'], [4.4, 9, 1, 1, '#4a4a48'], [3.3, 10.6, 0.9, 0.6, '#e8b84a']], lamps: [[4.5, 3], [4, 9.5]], tags: [[4.5, 5.6, 'gas trap'], [1.5, 3.4, 'power'], [4, 11.7, 'box, shotgun']] },
+      { name: 'Ground · start', col: PAL.ground, rooms: [[1, 1, 2, 3, 'Hall'], [3, 1, 6, 6, 'Parlour'], [3, 7, 5, 12, 'Dining']], hole: [1, 5, 2, 8], up: [1, 9, 2, 12], back: [6, 7, 6, 12],
+        furn: [[3.2, 3.6, 2.4, 0.8, '#5a2a2a'], [5.7, 1.6, 0.3, 1.8, '#2a2420'], [3.2, 8, 2, 3, '#4a2e1c']], lamps: [[4.5, 3], [4, 9.5], [1.5, 2]], tags: [[4.5, 5.6, 'Longshot'], [1, 2.7, 'door']] },
+      { name: '1st · 1000', col: PAL.first, rooms: [[3, 1, 6, 7, 'Drawing'], [3, 8, 5, 12, 'Study']], up: [1, 4, 2, 7], hole: [1, 9, 2, 12], back: [6, 8, 6, 12],
+        furn: [[2.6, 1, 1.4, 1.4, '#111214'], [4.4, 4.6, 1.5, 1.8, '#283a60'], [3.2, 9.6, 1.4, 1, '#4a2e1c']], lamps: [[4.2, 3.5], [4, 10]], tags: [[4.5, 6.6, 'Ripper'], [4, 11.7, 'box']] },
+      { name: '2nd · 1250', col: PAL.second, rooms: [[3, 1, 6, 5, 'Bedroom'], [3, 6, 6, 8, 'Bath'], [3, 9, 6, 12, 'Bedroom']], hole: [1, 4, 2, 7], up: [1, 9, 2, 12],
+        furn: [[3.6, 1.2, 2, 2.2, '#c8c0b0'], [4.2, 5.4, 1.7, 1.2, '#e8e8ec'], [2.4, 5.3, 0.7, 0.7, '#ff4a40'], [3.6, 9.4, 2, 2.2, '#7a4a3a']], lamps: [[4.5, 2.5], [4.5, 10]], tags: [[4.5, 7.7, 'Tough Juice'], [4.5, 11.7, 'box']] },
+      { name: 'Attic · 1500', col: PAL.attic, rooms: [[1, 1, 6, 7, 'Loft'], [3, 9, 6, 12, 'Box room']], hole: [1, 9, 2, 12],
+        furn: [[0.4, 1, 1.4, 1.4, '#4a5258'], [3.4, 9.4, 1, 0.6, '#5a3b26'], [5.1, 10.8, 0.7, 0.7, '#2ec4b6']], lamps: [[3, 4]], cold: [[3.5, 5.5]], tags: [[3.5, 6.7, 'skylight'], [4.5, 11.7, 'Quick Hands']] },
+    ];
+    floors.forEach((f, i) => {
+      const x0 = X(i), r = (x, z, w, h) => [x0 + (x - 1) * C, Y0 + (z - 1) * C, w * C, h * C];
+      s += `<text x="${x0}" y="${Y0 - 14}" fill="#f2eee6" font-family="Oswald" font-size="20" letter-spacing="1">${f.name.toUpperCase()}</text>`;
+      s += `<clipPath id="fl${i}"><rect x="${x0}" y="${Y0}" width="${6 * C}" height="${12 * C}"/></clipPath><g clip-path="url(#fl${i})">`;
+      s += `<rect x="${x0}" y="${Y0}" width="${6 * C}" height="${12 * C}" fill="${f.col}" fill-opacity=".55"/>`;
+      // Floorboards.
+      for (let k = 0; k < 24; k++) s += `<line x1="${x0}" x2="${x0 + 6 * C}" y1="${Y0 + k * C / 2}" y2="${Y0 + k * C / 2}" stroke="#000" stroke-opacity=".12"/>`;
+      for (const [lx, lz] of f.lamps) s += `<circle cx="${x0 + lx * C}" cy="${Y0 + lz * C}" r="${C * 2.6}" fill="url(#pool)"/>`;
+      for (const [lx, lz] of f.cold || []) s += `<circle cx="${x0 + lx * C}" cy="${Y0 + lz * C}" r="${C * 2}" fill="url(#cold)"/>`;
+      s += `</g>`;
+      for (const [fx, fz, w, h, c] of f.furn) s += `<rect x="${x0 + fx * C}" y="${Y0 + fz * C}" width="${w * C}" height="${h * C}" rx="3" fill="${c}" stroke="#000" stroke-opacity=".4"/>`;
+      if (f.up) { const [a, b, w, h] = r(f.up[0], f.up[1], f.up[2] - f.up[0] + 1, f.up[3] - f.up[1] + 1); s += `<rect x="${a}" y="${b}" width="${w}" height="${h}" fill="url(#steps)"/><text x="${a + w / 2}" y="${b + h / 2 + 5}" text-anchor="middle" fill="#f2eee6" font-family="Inter" font-size="13" font-weight="600">UP</text>`; }
+      if (f.hole) { const [a, b, w, h] = r(f.hole[0], f.hole[1], f.hole[2] - f.hole[0] + 1, f.hole[3] - f.hole[1] + 1); s += `<rect x="${a + 3}" y="${b + 3}" width="${w - 6}" height="${h - 6}" fill="#000" fill-opacity=".55" stroke="#c8b890" stroke-width="3"/><text x="${a + w / 2}" y="${b + h / 2 + 5}" text-anchor="middle" fill="#c8b890" font-family="Inter" font-size="12">down</text>`; }
+      if (f.back) { const [a, b, w, h] = r(f.back[0], f.back[1], 1, f.back[3] - f.back[1] + 1); s += `<rect x="${a}" y="${b}" width="${w}" height="${h}" fill="url(#steps)" opacity=".75"/>`; }
+      for (const [x1, z1, x2, z2, name] of f.rooms) {
+        const [a, b, w, h] = r(x1, z1, x2 - x1 + 1, z2 - z1 + 1);
+        s += `<rect x="${a}" y="${b}" width="${w}" height="${h}" fill="none" stroke="#e9e2d6" stroke-opacity=".7" stroke-width="2"/>`;
+        s += `<text x="${a + 8}" y="${b + 20}" fill="#fff" font-family="Inter" font-size="14" font-weight="600" style="paint-order:stroke" stroke="#000" stroke-width="3">${name}</text>`;
+      }
+      for (const [tx, tz, t] of f.tags) s += `<text x="${x0 + tx * C}" y="${Y0 + tz * C}" text-anchor="middle" fill="#e8b84a" font-family="Inter" font-size="12" font-weight="600" style="paint-order:stroke" stroke="#000" stroke-width="3">${t}</text>`;
+      // Windows (front and back).
+      s += `<rect x="${x0 + 3 * C}" y="${Y0 - 4}" width="${2 * C}" height="8" fill="#9fb4d8"/>`;
+      if (i < 4) s += `<rect x="${x0 + 3 * C}" y="${Y0 + 12 * C - 4}" width="${2 * C}" height="8" fill="#9fb4d8"/>`;
+      if (i === 1) s += `<rect x="${x0}" y="${Y0 - 4}" width="${2 * C}" height="8" fill="#e8b84a"/>`;
+      s += `<rect x="${x0}" y="${Y0}" width="${6 * C}" height="${12 * C}" fill="none" stroke="#f2eee6" stroke-width="4"/>`;
+    });
+    s += `<g font-family="Inter" font-size="14" fill="#c9c3b6"><rect x="40" y="${Y0 + 12 * C + 34}" width="22" height="14" fill="url(#steps)"/><text x="70" y="${Y0 + 12 * C + 46}">stairs (narrow strip on the right: servants' stair, 1500)</text><rect x="470" y="${Y0 + 12 * C + 34}" width="22" height="14" fill="#000" stroke="#c8b890" stroke-width="2"/><text x="500" y="${Y0 + 12 * C + 46}">stairwell from below (railing)</text><rect x="760" y="${Y0 + 12 * C + 38}" width="30" height="7" fill="#9fb4d8"/><text x="798" y="${Y0 + 12 * C + 46}">window</text><rect x="880" y="${Y0 + 12 * C + 38}" width="30" height="7" fill="#e8b84a"/><text x="918" y="${Y0 + 12 * C + 46}">front door (8 boards)</text></g>`;
+    return s + '</svg>';
+  },
+};
+
+const id = location.hash.slice(1) || 'street';
+const el = document.getElementById(id);
+el.innerHTML = views[id]();
+el.classList.add('on');
+</script>
+</body>
+</html>
