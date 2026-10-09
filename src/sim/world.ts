@@ -13,6 +13,8 @@ export class World {
   readonly offsets: number[] = [];
   readonly nodeCount: number;
   readonly stairBoxes: Box[] = [];
+  /** Visible static geometry, tagged for the renderer. */
+  readonly renderBoxes: { box: Box; kind: 'wall' | 'floor' | 'roof' | 'stair'; fi: number }[] = [];
   private stairCell = new Map<number, { fi: number; bottom: Set<number> }>();
   private blocked = new Set<number>();
 
@@ -55,6 +57,7 @@ export class World {
             box(x + 1 - b, Y - SLAB, z, x + 1 - a, top, z + 1);
           both(bx);
           this.stairBoxes.push(bx);
+          this.renderBoxes.push({ box: bx, kind: 'stair', fi });
         }
       }
     }
@@ -64,17 +67,21 @@ export class World {
       const above = map.floors[fi + 1];
       f.tiles.forEach((row, z) =>
         [...row].forEach((t, x) => {
-          if (t === '#') both(box(x, Y - SLAB, z, x + 1, Y + H, z + 1));
+          const vis = (b: Box, kind: 'wall' | 'floor' | 'roof') => (both(b), this.renderBoxes.push({ box: b, kind, fi }));
+          if (t === '#') vis(box(x, Y - SLAB, z, x + 1, Y + H, z + 1), 'wall');
           if (t === 'W') {
             const [lo, hi] = windowOpening(map, map.windows.find((w) => w.floor === f.id && w.cells.some((c) => c[0] === x && c[1] === z))!);
             body.push(box(x, Y - SLAB, z, x + 1, Y + H, z + 1));
-            ray.push(box(x, Y - SLAB, z, x + 1, Y + lo, z + 1), box(x, Y + hi, z, x + 1, Y + H, z + 1));
+            for (const b of [box(x, Y - SLAB, z, x + 1, Y + lo, z + 1), box(x, Y + hi, z, x + 1, Y + H, z + 1)]) {
+              ray.push(b);
+              this.renderBoxes.push({ box: b, kind: 'wall', fi });
+            }
           }
-          if (t === '.' || t === 'D') both(box(x, Y - SLAB, z, x + 1, Y, z + 1));
+          if (t === '.' || t === 'D') vis(box(x, Y - SLAB, z, x + 1, Y, z + 1), 'floor');
           const holeOverStairs = t === ' ' && tile(map, fi - 1, x, z) === 'S';
           const interior = t !== ' ' || holeOverStairs;
           if (interior && t !== 'S' && (!above || tile(map, fi + 1, x, z) === ' '))
-            both(box(x, Y + H - SLAB, z, x + 1, Y + H, z + 1));
+            vis(box(x, Y + H - SLAB, z, x + 1, Y + H, z + 1), 'roof');
         }),
       );
     });

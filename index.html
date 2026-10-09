@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zombiez</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/client/style.css">
+</head>
+<body>
+  <div id="view"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="damage"></div>
+    <div id="effects"></div>
+    <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <div id="prompt"></div>
+    <div id="perks"></div>
+    <div id="points" class="cond">500</div>
+    <div id="pops"></div>
+    <div id="round"></div>
+    <div id="ammo"><div id="wname" class="cond"></div><div class="cond"><span id="mag"></span><span id="reserve"></span></div></div>
+    <div id="banner" class="cond"></div>
+  </div>
+
+  <!-- Menus -->
+  <div id="menu-main" class="screen">
+    <div class="title">
+      <div class="cond logo">Zombiez</div>
+      <div class="bar"></div>
+      <div class="hint big">Survive the night.</div>
+    </div>
+    <nav class="list">
+      <button class="btn" data-go="select">Singleplayer</button>
+      <button class="btn dim" disabled>Multiplayer<span class="tag">Coming soon</span></button>
+      <button class="btn" data-go="settings">Settings</button>
+      <button class="btn" data-go="scores">High scores</button>
+    </nav>
+    <div class="foot hint">v0.1 &middot; [Enter] select &middot; [&uarr;&darr;] move</div>
+    <div class="foot right cond gold best"></div>
+  </div>
+
+  <div id="menu-select" class="screen dim-bg">
+    <button class="back cond" data-go="main">&lsaquo; Back</button>
+    <div class="cond h1">Select map</div>
+    <div class="cards">
+      <button class="card sel" data-go="confirm">
+        <div class="thumb"></div>
+        <div class="card-body">
+          <div class="cond card-title">The Farmhouse</div>
+          <div class="hint">4 zones &middot; 8 windows &middot; 3 doors</div>
+          <div class="cond gold best"></div>
+        </div>
+      </button>
+      <div class="card empty"><div class="cond">More maps</div><div class="hint">Coming with the map editor</div></div>
+    </div>
+    <div class="foot hint">[Esc] Back &nbsp;&nbsp; [Enter] Select</div>
+  </div>
+
+  <div id="menu-confirm" class="screen dim-bg">
+    <button class="back cond" data-go="select">&lsaquo; Back</button>
+    <div class="panel confirm">
+      <div class="thumb"></div>
+      <div class="confirm-body">
+        <div class="cond h2">The Farmhouse</div>
+        <div class="hint big">An old farmhouse at night. The power is out. Hold the ground floor, then buy your way up.</div>
+        <div class="cond label">Mode</div>
+        <div class="seg">
+          <button class="cond on" data-mode="normal">Normal</button>
+          <button class="cond" data-mode="daily">Daily seed &middot; <span id="daily-date"></span></button>
+        </div>
+        <div class="cond gold best"></div>
+        <div class="grow"></div>
+        <div class="row">
+          <button class="ghost cond" data-go="select">Back</button>
+          <button class="primary cond" id="start">Confirm &middot; Start</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="menu-settings" class="screen dim-bg">
+    <button class="back cond" data-go="main">&lsaquo; Back</button>
+    <div class="cond h1">Settings</div>
+    <div class="panel form">
+      <label>Mouse sensitivity <input type="range" id="set-sens" min="0.2" max="3" step="0.05"></label>
+      <label>Volume <input type="range" id="set-vol" min="0" max="1" step="0.05"></label>
+      <label>Field of view <input type="range" id="set-fov" min="70" max="110" step="1"><span id="fov-val"></span></label>
+      <label class="check"><input type="checkbox" id="set-invert"> Invert Y</label>
+      <label class="check"><input type="checkbox" id="set-shake"> Reduce screen shake</label>
+    </div>
+  </div>
+
+  <div id="menu-scores" class="screen dim-bg">
+    <button class="back cond" data-go="main">&lsaquo; Back</button>
+    <div class="cond h1">High scores</div>
+    <div class="panel form"><table id="scores"></table></div>
+  </div>
+
+  <div id="pause" class="screen blur">
+    <div class="panel pause">
+      <div class="cond h2">Paused</div>
+      <div class="hint" id="pause-info"></div>
+      <nav class="list small">
+        <button class="btn" id="resume">Resume</button>
+        <button class="btn" data-go="settings">Settings</button>
+        <button class="btn" id="quit">Quit to menu</button>
+      </nav>
+    </div>
+    <div class="foot center hint">Click Resume to lock the mouse again.</div>
+  </div>
+
+  <div id="gameover" class="screen blur red">
+    <div class="over-head">
+      <div class="cond sub">Game over</div>
+      <div class="cond huge">You survived <span class="red-text" id="go-round"></span> <span id="go-rounds-word">rounds</span></div>
+      <div class="cond newbest hidden" id="go-best">New best</div>
+    </div>
+    <div class="panel stats" id="go-stats"></div>
+    <div class="row center">
+      <button class="primary gold-btn cond" id="again">Again</button>
+      <button class="ghost cond" id="to-menu">Main menu</button>
+    </div>
+    <div class="foot center hint" id="go-share"></div>
+  </div>
+
+
+  <script type="module" src="/src/client/main.ts"></script>
+</body>
+</html>
