@@ -92,6 +92,7 @@ export interface Player {
   boardPts: number;
   prev: { fire: boolean; use: boolean; swap: boolean; reload: boolean; melee: boolean };
   stats: { kills: number; headshots: number; earned: number; boards: number };
+  flowNode: number;
 }
 
 export interface Zombie {
@@ -204,6 +205,7 @@ export class Sim {
         boardPts: 0,
         prev: { fire: false, use: false, swap: false, reload: false, melee: false },
         stats: { kills: 0, headshots: 0, earned: 0, boards: 0 },
+        flowNode: -1,
       };
     });
     this.world.update(s.doors, s.box.spot);
@@ -217,7 +219,7 @@ export class Sim {
     this.events = [];
     const s = this.state;
     if (s.phase !== 'over') {
-      for (const p of s.players) this.updatePlayer(p, cmds[p.id] ?? NO_INPUT);
+      for (const p of s.players) this.updatePlayer(p, cmds[p.id] ?? { ...NO_INPUT, yaw: p.yaw, pitch: p.pitch });
       this.updateRound();
       this.updateFlows();
       for (const z of [...s.zombies]) this.updateZombie(z);
@@ -626,14 +628,13 @@ export class Sim {
     return z;
   }
 
+  /** Each player's path field depends only on their last nav cell (kept in state) and the doors, so a restored snapshot rebuilds the same field. */
   private updateFlows() {
-    // Recompute each player's path field 4 times a second, or at once when they move to a new cell.
     for (const p of this.state.players) {
-      if (p.down) { this.flows.delete(p.id); continue; }
       const n = this.world.nodeAt(p.pos);
+      if (n >= 0) p.flowNode = n;
       const f = this.flows.get(p.id);
-      if (f && (f.node === n || n < 0) && this.state.tick % 8) continue;
-      if (n >= 0 || !f) this.flows.set(p.id, { field: this.world.flow(n), node: n });
+      if (!f || f.node !== p.flowNode) this.flows.set(p.id, { field: this.world.flow(p.flowNode), node: p.flowNode });
     }
   }
 
@@ -824,7 +825,7 @@ export class Sim {
       const p = this.player(b.pid!);
       if (b.uses >= b.moveAt) {
         if (p) p.points += BOX_COST;
-        const others = this.map.boxSpots.map((_, i) => i).filter((i) => i !== b.spot);
+        const others = this.map.boxSpots.map((_, i) => i).filter((i) => i !== b.spot && s.zones[this.map.boxSpots[i].zone]);
         if (others.length) b.spot = others[Math.floor(this.rand() * others.length)];
         Object.assign(b, { phase: 'idle', t: 0, uses: 0, moveAt: 4 + Math.floor(this.rand() * 5), pid: null, weapon: null });
         this.world.update(s.doors, b.spot);

@@ -104,8 +104,10 @@
     { "weapon": "longshot", "floor": "cellar", "cell": [8, 2], "facing": "n" }
   ],
   "boxSpots": [
-    { "floor": "upper", "cell": [6, 4] },
-    { "floor": "upper", "cell": [5, 13] }
+    { "floor": "upper", "cell": [6, 4], "zone": "B" },
+    { "floor": "upper", "cell": [5, 13], "zone": "D" },
+    { "floor": "ground", "cell": [6, 14], "zone": "A" },
+    { "floor": "cellar", "cell": [11, 3], "zone": "C" }
   ],
   "perks": [
     { "perk": "tough", "floor": "cellar", "cell": [9, 12] },

@@ -13,6 +13,31 @@ export type Snap = { x: number; y: number; z: number; yaw: number };
 
 const lam = (color: number, emissive = 0) => new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: emissive ? 1 : 0 });
 const UNIT = new THREE.BoxGeometry(1, 1, 1);
+const SPHERE = new THREE.SphereGeometry(1, 12, 8);
+const PLANE = new THREE.PlaneGeometry(1, 1);
+const TRACER = new THREE.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.6 });
+const shared = new Set<THREE.Material>([TRACER]);
+const cache = new Map<string, THREE.Material>();
+function cached<T extends THREE.Material>(key: string, make: () => T): T {
+  let m = cache.get(key) as T | undefined;
+  if (!m) { m = make(); cache.set(key, m); shared.add(m); }
+  return m;
+}
+const basic = (color: number) => cached(`b${color}`, () => new THREE.MeshBasicMaterial({ color }));
+const lamC = (color: number) => cached(`l${color}`, () => lam(color));
+
+/** Frees GPU resources under a node, except the shared ones above. */
+function dispose(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.geometry && m.geometry !== UNIT && m.geometry !== SPHERE && m.geometry !== PLANE) m.geometry.dispose();
+    for (const mat of [m.material ?? []].flat() as THREE.Material[]) {
+      if (shared.has(mat)) continue;
+      (mat as THREE.MeshLambertMaterial).map?.dispose();
+      mat.dispose();
+    }
+  });
+}
 
 function tex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) {
   const c = document.createElement('canvas');
@@ -119,11 +144,12 @@ export class Renderer {
   private zombies = new Map<number, ZMesh>();
   private dying: { z: ZMesh; t: number }[] = [];
   private pups = new Map<number, THREE.Mesh>();
-  private pupTex = new Map<PowerupKind, THREE.Texture>();
+  private pupMat = new Map<PowerupKind, THREE.MeshBasicMaterial>();
   private shots = new Map<number, THREE.Mesh>();
   private particles: Particle[] = [];
   private tracers: { l: THREE.Line; t: number }[] = [];
-  private flashes: { m: THREE.Mesh; light: THREE.PointLight; t: number; life: number; r: number }[] = [];
+  private flashes: { m: THREE.Mesh; t: number; life: number; r: number }[] = [];
+  private blast = new THREE.PointLight(0xffa040, 0, 10, 2);
   private box = new THREE.Group();
   private boxLid = new THREE.Group();
   private boxGun = new THREE.Group();
@@ -153,7 +179,7 @@ export class Renderer {
     this.scene.background = new THREE.Color(C.fogDeep);
     this.scene.fog = new THREE.FogExp2(C.fog, 0.05);
     this.camera.rotation.order = 'YXZ';
-    this.scene.add(this.camera, this.level);
+    this.scene.add(this.camera, this.level, this.blast);
     this.scene.add(new THREE.HemisphereLight(0x5a6a88, 0x1a120c, 1.1));
     const moon = new THREE.DirectionalLight(C.moon, 1.2);
     moon.position.set(-30, 40, -20);
@@ -165,7 +191,8 @@ export class Renderer {
     this.knife.add(boxMesh(0.03, 0.02, 0.26, lam(0xb8bcc4), 0, 0, -0.13), boxMesh(0.04, 0.05, 0.1, lam(0x2a1e14), 0, 0, 0.05));
     this.knife.visible = false;
     this.camera.add(this.knife);
-    for (const k of ['maxAmmo', 'instaKill', 'doublePoints', 'nuke'] as PowerupKind[]) this.pupTex.set(k, iconTexture(k));
+    for (const k of ['maxAmmo', 'instaKill', 'doublePoints', 'nuke'] as PowerupKind[])
+      this.pupMat.set(k, new THREE.MeshBasicMaterial({ map: iconTexture(k), transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false }));
     this.buildExterior();
     addEventListener('resize', () => this.resize());
     this.resize();
@@ -229,6 +256,7 @@ export class Renderer {
     this.sim = sim;
     const map = sim.map;
     this.scene.remove(this.level);
+    dispose(this.level);
     this.level = new THREE.Group();
     this.scene.add(this.level);
     this.boards.clear();
@@ -405,9 +433,9 @@ export class Renderer {
 
   private zombieMesh(z: Zombie): ZMesh {
     const v = z.id % 3;
-    const skin = lam(C.skin[v]);
-    const shirt = lam(C.shirt[(z.id >> 2) % 3]);
-    const pants = lam(C.pants);
+    const skin = lamC(C.skin[v]);
+    const shirt = lamC(C.shirt[(z.id >> 2) % 3]);
+    const pants = lamC(C.pants);
     const root = new THREE.Group();
     const body = new THREE.Group();
     root.add(body);
@@ -419,7 +447,7 @@ export class Renderer {
       return g;
     });
     body.add(boxMesh(0.5, 0.62, 0.28, shirt, 0, 1.08, 0));
-    body.add(boxMesh(0.26, 0.2, 0.02, lam(C.blood), 0.06, 0.95, -0.15));
+    body.add(boxMesh(0.26, 0.2, 0.02, lamC(C.blood), 0.06, 0.95, -0.15));
     const arms = [-0.32, 0.32].map((x) => {
       const g = new THREE.Group();
       g.position.set(x, 1.33, 0);
@@ -429,7 +457,7 @@ export class Renderer {
     });
     const head = new THREE.Group();
     head.position.set(0, 1.62, 0);
-    const eye = new THREE.MeshBasicMaterial({ color: C.eyes });
+    const eye = basic(C.eyes);
     head.add(boxMesh(0.3, 0.32, 0.3, skin), boxMesh(0.06, 0.045, 0.02, eye, -0.07, 0.03, -0.155), boxMesh(0.06, 0.045, 0.02, eye, 0.07, 0.03, -0.155));
     body.add(head);
     this.level.add(root);
@@ -461,7 +489,7 @@ export class Renderer {
   // ---------------------------------------------------------------- effects
 
   private particle(at: V3, color: number, n: number, speed: number, size = 0.045, life = 0.5) {
-    const mat = new THREE.MeshBasicMaterial({ color });
+    const mat = basic(color);
     for (let i = 0; i < n; i++) {
       const m = boxMesh(size, size, size, mat, at.x, at.y, at.z);
       this.scene.add(m);
@@ -470,12 +498,14 @@ export class Renderer {
   }
 
   private flash(at: V3, color: number, r: number, life: number) {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const m = new THREE.Mesh(SPHERE, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
     m.position.set(at.x, at.y, at.z);
-    const light = new THREE.PointLight(color, 40, r * 4, 2);
-    light.position.copy(m.position);
-    this.scene.add(m, light);
-    this.flashes.push({ m, light, t: 0, life, r });
+    // One light for all explosions, so the light count (and compiled shaders) never changes.
+    this.blast.position.copy(m.position);
+    this.blast.color.setHex(color);
+    this.blast.distance = r * 4;
+    this.scene.add(m);
+    this.flashes.push({ m, t: 0, life, r });
   }
 
   onEvents(evs: GameEvent[], localId: string) {
@@ -489,7 +519,7 @@ export class Renderer {
           for (const end of e.ends.slice(0, 4)) {
             const tip = this.gunTipWorld();
             const g = new THREE.BufferGeometry().setFromPoints([tip, new THREE.Vector3(end.x, end.y, end.z)]);
-            const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.6 }));
+            const l = new THREE.Line(g, TRACER);
             this.scene.add(l);
             this.tracers.push({ l, t: 0.05 });
             this.particle(end, 0x8a8170, 2, 1.5, 0.04, 0.25);
@@ -587,8 +617,8 @@ export class Renderer {
       pseen.add(pu.id);
       let m = this.pups.get(pu.id);
       if (!m) {
-        m = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.7), new THREE.MeshBasicMaterial({ map: this.pupTex.get(pu.kind), transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false }));
-        m.add(new THREE.PointLight(C.power, 3, 4, 2));
+        m = new THREE.Mesh(PLANE, this.pupMat.get(pu.kind));
+        m.scale.setScalar(0.7);
         this.scene.add(m);
         this.pups.set(pu.id, m);
       }
@@ -604,7 +634,8 @@ export class Renderer {
       sseen.add(pr.id);
       let m = this.shots.get(pr.id);
       if (!m) {
-        m = new THREE.Mesh(new THREE.SphereGeometry(pr.weapon === 'zapper' ? 0.12 : 0.08, 8, 6), new THREE.MeshBasicMaterial({ color: pr.weapon === 'zapper' ? C.power : 0x444a3a }));
+        m = new THREE.Mesh(SPHERE, basic(pr.weapon === 'zapper' ? C.power : 0x444a3a));
+        m.scale.setScalar(pr.weapon === 'zapper' ? 0.12 : 0.08);
         this.scene.add(m);
         this.shots.set(pr.id, m);
       }
@@ -634,15 +665,15 @@ export class Renderer {
     }
     for (const t of [...this.tracers]) {
       t.t -= dt;
-      if (t.t <= 0) { t.l.removeFromParent(); this.tracers.splice(this.tracers.indexOf(t), 1); }
+      if (t.t <= 0) { t.l.removeFromParent(); t.l.geometry.dispose(); this.tracers.splice(this.tracers.indexOf(t), 1); }
     }
     for (const f of [...this.flashes]) {
       f.t += dt;
       const k = f.t / f.life;
       f.m.scale.setScalar(f.r * (0.3 + k));
       (f.m.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - k);
-      f.light.intensity = 40 * (1 - k);
-      if (k >= 1) { f.m.removeFromParent(); f.light.removeFromParent(); this.flashes.splice(this.flashes.indexOf(f), 1); }
+      this.blast.intensity = 40 * (1 - k);
+      if (k >= 1) { f.m.removeFromParent(); (f.m.material as THREE.Material).dispose(); this.flashes.splice(this.flashes.indexOf(f), 1); }
     }
 
     // Rain.

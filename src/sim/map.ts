@@ -20,7 +20,7 @@ export interface MapDef {
   doors: { id: string; floor: string; cells: Cell[]; cost: number; opens: string }[];
   stairs: { floor: string; cells: Cell[]; up: Dir }[];
   wallBuys: (Placed & { weapon: string; facing: Dir })[];
-  boxSpots: Placed[];
+  boxSpots: (Placed & { zone: string })[];
   perks: (Placed & { perk: string })[];
   power?: Placed & { facing: Dir };
   lamps: Placed[];
@@ -113,6 +113,7 @@ export function validateMap(map: MapDef): string[] {
     checkFloor(p.floor, what);
     if (at(p.floor, p.cell) !== '.') errs.push(`${what}: cell ${p.cell} on ${p.floor} is not floor`);
   }
+  for (const b of map.boxSpots) if (!zones.has(b.zone)) errs.push(`box spot ${b.cell}: zone ${b.zone} is never opened`);
   if (!map.playerSpawns.length) errs.push('no player spawns');
   return errs;
 }

@@ -145,7 +145,8 @@ describe('mystery box', () => {
       run(sim, 8.1);
     }
     expect(uses + 1).toBe(moveAt);
-    expect(sim.state.box.spot).toBe(1);
+    // Only zone A is open, so the box can only move to the ground-floor spot.
+    expect(map.boxSpots[sim.state.box.spot].zone).toBe('A');
     expect(sim.state.players[0].points).toBe(1e6 - 950 * (moveAt - 1));
   });
 });
@@ -275,6 +276,29 @@ describe('movement', () => {
     run(sim, 0.05, { yaw: 0, pitch, fire: true });
     expect(sim.state.zombies).toHaveLength(0);
     expect(p.points).toBe(600);
+  });
+});
+
+describe('input', () => {
+  it('a missing command keeps the player aim', () => {
+    const sim = quiet();
+    run(sim, 0.1, { yaw: 1.2, pitch: 0.3 });
+    sim.step({});
+    expect(sim.state.players[0].yaw).toBe(1.2);
+    expect(sim.state.players[0].pitch).toBe(0.3);
+  });
+});
+
+describe('snapshots', () => {
+  it('a sim restored from a state snapshot plays on identically', () => {
+    const a = new Sim(map, 9);
+    const cmd = (t: number): Command => ({ ...NO_INPUT, yaw: t * 0.02, fire: t % 15 < 2, fwd: Math.sin(t / 40) });
+    for (let t = 0; t < 900; t++) a.step({ p1: cmd(t) });
+    const b = new Sim(map, 9);
+    Object.assign(b.state, JSON.parse(JSON.stringify(a.state)));
+    b.world.update(b.state.doors, b.state.box.spot);
+    for (let t = 900; t < 1800; t++) { a.step({ p1: cmd(t) }); b.step({ p1: cmd(t) }); }
+    expect(JSON.stringify(b.state)).toBe(JSON.stringify(a.state));
   });
 });
 

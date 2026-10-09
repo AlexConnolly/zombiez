@@ -45,6 +45,7 @@ let app: 'menu' | 'playing' | 'paused' | 'over' = 'menu';
 let prev = new Map<string | number, Snap>();
 let startTick = 0;
 let settingsBack = 'main';
+let overTimer = 0;
 
 // ---------------------------------------------------------------- input
 
@@ -65,9 +66,17 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => { keys.clear(); fire = false; });
-addEventListener('mousedown', (e) => { if (e.button === 0) fire = true; });
+addEventListener('mousedown', (e) => {
+  if (app === 'playing' && !DEBUG && document.pointerLockElement !== canvas) return void lock();
+  if (e.button === 0) fire = true;
+});
 addEventListener('mouseup', (e) => { if (e.button === 0) fire = false; });
-addEventListener('wheel', () => { if (app === 'playing') swapPulse = true; });
+let wheelAt = 0;
+addEventListener('wheel', () => {
+  if (app !== 'playing' || performance.now() - wheelAt < 300) return;
+  wheelAt = performance.now();
+  swapPulse = true;
+});
 addEventListener('mousemove', (e) => {
   if (app !== 'playing' || (document.pointerLockElement !== canvas && !DEBUG)) return;
   const k = 0.0022 * settings.sens;
@@ -75,8 +84,11 @@ addEventListener('mousemove', (e) => {
   pitch = Math.max(-1.5, Math.min(1.5, pitch - e.movementY * k * (settings.invert ? -1 : 1)));
 });
 addEventListener('contextmenu', (e) => e.preventDefault());
+document.addEventListener('pointerlockerror', () => $('#lockhint').classList.toggle('hidden', DEBUG));
 document.addEventListener('pointerlockchange', () => {
-  if (document.pointerLockElement !== canvas && app === 'playing' && !DEBUG) pause();
+  const locked = document.pointerLockElement === canvas;
+  $('#lockhint').classList.toggle('hidden', locked || DEBUG);
+  if (!locked && app === 'playing' && !DEBUG) pause();
 });
 
 function command(): Command {
@@ -98,7 +110,11 @@ function command(): Command {
   return c;
 }
 
-const lock = () => canvas.requestPointerLock()?.catch?.(() => {});
+// The browser refuses a lock asked for too soon after one was released; the hint asks for another click.
+const lock = () => {
+  $('#lockhint').classList.toggle('hidden', DEBUG);
+  canvas.requestPointerLock()?.catch?.(() => {});
+};
 
 // ---------------------------------------------------------------- screens
 
@@ -168,6 +184,7 @@ function renderScores() {
 // ---------------------------------------------------------------- game flow
 
 function startGame() {
+  clearTimeout(overTimer);
   sound.start();
   sim = new Sim(map, mode === 'daily' ? dailySeed() : (Math.random() * 2 ** 31) | 0);
   if (DEBUG) Object.assign(window, { sim, setLook: (y: number, p: number) => ((yaw = y), (pitch = p)) });
@@ -192,6 +209,7 @@ $('#resume').addEventListener('click', () => {
 });
 
 function toMenu() {
+  clearTimeout(overTimer);
   app = 'menu';
   sim = menuSim;
   renderer.load(menuSim);
@@ -208,6 +226,7 @@ function pause() {
 }
 
 function gameOver() {
+  if (sim.state.phase !== 'over') return;
   app = 'over';
   if (document.pointerLockElement) document.exitPointerLock();
   const s = sim.state;
@@ -280,7 +299,7 @@ function hudEvents(evs: GameEvent[]) {
     if (e.type === 'roundEnd') banner(`Round ${e.round} survived`);
     if (e.type === 'powerup') banner(PU_NAMES[e.kind]);
     if (e.type === 'power') banner('Power on');
-    if (e.type === 'gameOver') setTimeout(gameOver, 2500);
+    if (e.type === 'gameOver') overTimer = setTimeout(gameOver, 2500);
   }
 }
 
