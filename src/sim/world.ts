@@ -1,0 +1,221 @@
+import { DIRS, cellCenter, floorIndex, stairExits, tile, windowOpening, type Cell, type MapDef, type V3 } from './map';
+import { SolidIndex, box, type Box } from './physics';
+
+const SLAB = 0.2;
+
+/** Static geometry and navigation derived from a map. Not part of the serialisable game state. */
+export class World {
+  readonly staticBody: SolidIndex;
+  readonly staticRay: SolidIndex;
+  dynamic = new SolidIndex([]);
+  /** For each nav node: [neighbour, cost] pairs. */
+  edges: [number, number][][] = [];
+  readonly offsets: number[] = [];
+  readonly nodeCount: number;
+  readonly stairBoxes: Box[] = [];
+  private stairCell = new Map<number, { fi: number; bottom: Set<number> }>();
+  private blocked = new Set<number>();
+
+  constructor(readonly map: MapDef) {
+    let n = 0;
+    for (const f of map.floors) {
+      this.offsets.push(n);
+      n += f.tiles.length * (f.tiles[0]?.length ?? 0);
+    }
+    this.nodeCount = n;
+
+    const body: Box[] = [];
+    const ray: Box[] = [];
+    const both = (b: Box) => (body.push(b), ray.push(b));
+    const H = map.wallHeight;
+
+    for (const s of map.stairs) {
+      const fi = floorIndex(map, s.floor);
+      const [dx, dz] = DIRS[s.up];
+      const prog = (c: Cell) => c[0] * dx + c[1] * dz;
+      const lo = Math.min(...s.cells.map(prog));
+      const len = Math.max(...s.cells.map(prog)) - lo + 1;
+      const Y = map.floors[fi].y;
+      const rise = map.floors[fi + 1].y - Y;
+      const per = Math.ceil(rise / 0.25 / len);
+      const total = per * len;
+      const bottom = new Set(s.cells.filter((c) => prog(c) === lo).map(([x, z]) => this.node(fi, x - dx, z - dz)));
+      for (const c of s.cells) {
+        this.stairCell.set(this.node(fi, c[0], c[1]), { fi, bottom });
+        for (let j = 0; j < per; j++) {
+          const top = Y + (rise * ((prog(c) - lo) * per + j + 1)) / total;
+          // Sub-step j covers the slice [j/per, (j+1)/per] of the cell, counted from its low side.
+          const a = j / per;
+          const b = (j + 1) / per;
+          const [x, z] = c;
+          const bx =
+            s.up === 'n' ? box(x, Y - SLAB, z + 1 - b, x + 1, top, z + 1 - a) :
+            s.up === 's' ? box(x, Y - SLAB, z + a, x + 1, top, z + b) :
+            s.up === 'e' ? box(x + a, Y - SLAB, z, x + b, top, z + 1) :
+            box(x + 1 - b, Y - SLAB, z, x + 1 - a, top, z + 1);
+          both(bx);
+          this.stairBoxes.push(bx);
+        }
+      }
+    }
+
+    map.floors.forEach((f, fi) => {
+      const Y = f.y;
+      const above = map.floors[fi + 1];
+      f.tiles.forEach((row, z) =>
+        [...row].forEach((t, x) => {
+          if (t === '#') both(box(x, Y - SLAB, z, x + 1, Y + H, z + 1));
+          if (t === 'W') {
+            const [lo, hi] = windowOpening(map, map.windows.find((w) => w.floor === f.id && w.cells.some((c) => c[0] === x && c[1] === z))!);
+            body.push(box(x, Y - SLAB, z, x + 1, Y + H, z + 1));
+            ray.push(box(x, Y - SLAB, z, x + 1, Y + lo, z + 1), box(x, Y + hi, z, x + 1, Y + H, z + 1));
+          }
+          if (t === '.' || t === 'D') both(box(x, Y - SLAB, z, x + 1, Y, z + 1));
+          const holeOverStairs = t === ' ' && tile(map, fi - 1, x, z) === 'S';
+          const interior = t !== ' ' || holeOverStairs;
+          if (interior && t !== 'S' && (!above || tile(map, fi + 1, x, z) === ' '))
+            both(box(x, Y + H - SLAB, z, x + 1, Y + H, z + 1));
+        }),
+      );
+    });
+
+    for (const p of map.perks) {
+      const fi = floorIndex(map, p.floor);
+      const [x, z] = p.cell;
+      const Y = map.floors[fi].y;
+      both(box(x + 0.15, Y, z + 0.15, x + 0.85, Y + 2, z + 0.85));
+      this.blocked.add(this.node(fi, x, z));
+    }
+    for (const p of map.boxSpots) this.blocked.add(this.node(floorIndex(map, p.floor), p.cell[0], p.cell[1]));
+
+    this.staticBody = new SolidIndex(body);
+    this.staticRay = new SolidIndex(ray);
+  }
+
+  node(fi: number, x: number, z: number): number {
+    const f = this.map.floors[fi];
+    const w = f.tiles[0].length;
+    if (x < 0 || z < 0 || x >= w || z >= f.tiles.length) return -1;
+    return this.offsets[fi] + z * w + x;
+  }
+
+  nodeCell(n: number): { fi: number; x: number; z: number } {
+    let fi = this.offsets.length - 1;
+    while (this.offsets[fi] > n) fi--;
+    const w = this.map.floors[fi].tiles[0].length;
+    const i = n - this.offsets[fi];
+    return { fi, x: i % w, z: Math.floor(i / w) };
+  }
+
+  nodePos(n: number): V3 {
+    const { fi, x, z } = this.nodeCell(n);
+    return cellCenter(this.map, fi, x, z);
+  }
+
+  /** Rebuilds the parts that change: closed doors, the mystery box, and the walkable graph. */
+  update(openDoors: Record<string, boolean>, boxSpot: number) {
+    const map = this.map;
+    const dyn: Box[] = [];
+    const closed = new Set<number>();
+    for (const d of map.doors) {
+      if (openDoors[d.id]) continue;
+      const fi = floorIndex(map, d.floor);
+      const Y = map.floors[fi].y;
+      for (const [x, z] of d.cells) {
+        dyn.push(box(x, Y, z, x + 1, Y + map.wallHeight, z + 1));
+        closed.add(this.node(fi, x, z));
+      }
+    }
+    const spot = map.boxSpots[boxSpot];
+    if (spot) {
+      const fi = floorIndex(map, spot.floor);
+      const [x, z] = spot.cell;
+      const Y = map.floors[fi].y;
+      dyn.push(box(x + 0.05, Y, z + 0.2, x + 0.95, Y + 0.9, z + 0.8));
+    }
+    this.dynamic = new SolidIndex(dyn);
+
+    const walk = (n: number) => {
+      if (n < 0 || closed.has(n) || this.blocked.has(n)) return false;
+      const { fi, x, z } = this.nodeCell(n);
+      const t = tile(map, fi, x, z);
+      return t === '.' || t === 'S' || t === 'D';
+    };
+    const link = (a: number, b: number) => {
+      const sa = this.stairCell.get(a);
+      const sb = this.stairCell.get(b);
+      if (sa && sb) return true;
+      if (sa) return sa.bottom.has(b);
+      if (sb) return sb.bottom.has(a);
+      return true;
+    };
+    this.edges = Array.from({ length: this.nodeCount }, () => []);
+    map.floors.forEach((f, fi) =>
+      f.tiles.forEach((row, z) =>
+        [...row].forEach((_, x) => {
+          const a = this.node(fi, x, z);
+          if (!walk(a)) return;
+          for (let dz = -1; dz <= 1; dz++)
+            for (let dx = -1; dx <= 1; dx++) {
+              if (!dx && !dz) continue;
+              const b = this.node(fi, x + dx, z + dz);
+              if (!walk(b) || !link(a, b)) continue;
+              if (dx && dz && (!walk(this.node(fi, x + dx, z)) || !walk(this.node(fi, x, z + dz)))) continue;
+              this.edges[a].push([b, dx && dz ? Math.SQRT2 : 1]);
+            }
+        }),
+      ),
+    );
+    for (const s of map.stairs) {
+      const fi = floorIndex(map, s.floor);
+      const [dx, dz] = DIRS[s.up];
+      const exits = stairExits(map, s);
+      for (const [x, z] of exits) {
+        const a = this.node(fi, x - dx, z - dz);
+        const b = this.node(fi + 1, x, z);
+        if (walk(a) && walk(b)) {
+          this.edges[a].push([b, 1]);
+          this.edges[b].push([a, 1]);
+        }
+      }
+    }
+  }
+
+  /** Nav node under a position, or -1. */
+  nodeAt(p: V3): number {
+    const fl = this.map.floors;
+    let fi = fl.length - 1;
+    while (fi > 0 && fl[fi].y > p.y + 0.6) fi--;
+    const x = Math.floor(p.x / this.map.cellSize);
+    const z = Math.floor(p.z / this.map.cellSize);
+    for (; fi >= 0; fi--) {
+      const n = this.node(fi, x, z);
+      if (n >= 0 && this.edges[n]?.length) return n;
+    }
+    return -1;
+  }
+
+  /** Path cost from every node to the target node (Dijkstra). Unreachable = Infinity. */
+  flow(target: number): Float64Array {
+    const d = new Float64Array(this.nodeCount).fill(Infinity);
+    if (target < 0) return d;
+    d[target] = 0;
+    // ponytail: array-scan priority queue, O(n^2) on ~700 nodes; use a heap if maps grow past a few thousand cells.
+    const open = new Set([target]);
+    while (open.size) {
+      let u = -1;
+      for (const n of open) if (u < 0 || d[n] < d[u]) u = n;
+      open.delete(u);
+      for (const [v, c] of this.edges[u]) {
+        if (d[u] + c < d[v]) {
+          d[v] = d[u] + c;
+          open.add(v);
+        }
+      }
+    }
+    return d;
+  }
+
+  body(): SolidIndex[] { return [this.staticBody, this.dynamic]; }
+  ray(): SolidIndex[] { return [this.staticRay, this.dynamic]; }
+}

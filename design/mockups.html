@@ -1,0 +1,428 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fog: #1B2433; --fog-deep: #0E131C; --moon: #8FA6C8;
+    --lamp: #E89A3C; --wood: #5A3B26; --plaster: #4A3B2C;
+    --skin: #6E7B5C; --eyes: #F2D35B; --gold: #E8B84A;
+    --red: #C2161B; --blood: #7A0F12; --power: #5CFF8A; --ink: #F2EEE6;
+    --note: #3AD1FF;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #000; font-family: Inter, sans-serif; color: var(--ink); }
+  .view { display: none; position: relative; overflow: hidden; }
+  .view.on { display: block; }
+  .screen { width: 1280px; height: 720px; }
+  .cond { font-family: Oswald, sans-serif; text-transform: uppercase; letter-spacing: .04em; }
+  .abs { position: absolute; }
+  .badge { position: absolute; width: 26px; height: 26px; border-radius: 50%; background: var(--note); color: #001; font: 700 14px Inter; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px rgba(0,0,0,.6); }
+  .btn { font-family: Oswald; text-transform: uppercase; font-size: 34px; letter-spacing: .06em; color: #b9b2a6; padding: 6px 0 6px 22px; border-left: 4px solid transparent; }
+  .btn.sel { color: var(--ink); border-left-color: var(--gold); text-shadow: 0 0 18px rgba(232,184,74,.5); }
+  .btn.dim { color: #5d5850; }
+  .tag { font: 600 12px Inter; letter-spacing: .08em; text-transform: uppercase; color: #8b8478; border: 1px solid #4d4840; padding: 2px 6px; border-radius: 3px; vertical-align: middle; margin-left: 10px; }
+  .panel { background: rgba(10,10,12,.82); border: 1px solid #3a352e; border-radius: 6px; }
+  .key { display: inline-block; min-width: 26px; padding: 0 6px; border: 2px solid var(--ink); border-radius: 4px; font: 700 16px Inter; text-align: center; line-height: 22px; margin-right: 8px; }
+  .hint { font: 400 15px Inter; color: #9a9389; }
+</style>
+</head>
+<body>
+
+<!-- ============ PALETTE ============ -->
+<div class="view" id="palette" style="width:1280px;height:520px;background:#111;padding:40px">
+  <div class="cond" style="font-size:28px;margin-bottom:24px">Zombiez palette</div>
+  <div id="swatches" style="display:grid;grid-template-columns:repeat(6,1fr);gap:18px"></div>
+</div>
+
+<!-- ============ HUD ============ -->
+<div class="view screen" id="hud">
+  <div class="scene abs" style="inset:0"></div>
+  <!-- damage edges -->
+  <div class="abs" style="inset:0;box-shadow: inset 0 0 160px 30px rgba(194,22,27,.35)"></div>
+  <!-- power-up active -->
+  <div class="abs" style="top:24px;left:50%;transform:translateX(-50%);text-align:center">
+    <div style="width:56px;height:56px;margin:0 auto;border-radius:10px;background:rgba(92,255,138,.12);border:2px solid var(--power);box-shadow:0 0 18px rgba(92,255,138,.6);display:flex;align-items:center;justify-content:center" class="cond"><span style="font-size:28px;color:var(--power)">x2</span></div>
+    <div style="width:120px;height:4px;background:#2a2a2a;margin:8px auto 0"><div style="width:70%;height:100%;background:var(--power)"></div></div>
+    <div class="cond" style="font-size:14px;margin-top:4px;color:#cfe">Double points 0:21</div>
+  </div>
+  <!-- crosshair + hit marker -->
+  <svg class="abs" style="left:610px;top:330px" width="60" height="60" viewBox="0 0 60 60">
+    <g stroke="#F2EEE6" stroke-width="2"><line x1="30" y1="10" x2="30" y2="22"/><line x1="30" y1="38" x2="30" y2="50"/><line x1="10" y1="30" x2="22" y2="30"/><line x1="38" y1="30" x2="50" y2="30"/></g>
+    <g stroke="#fff" stroke-width="3"><line x1="20" y1="20" x2="26" y2="26"/><line x1="40" y1="20" x2="34" y2="26"/><line x1="20" y1="40" x2="26" y2="34"/><line x1="40" y1="40" x2="34" y2="34"/></g>
+  </svg>
+  <!-- prompt -->
+  <div class="abs" style="top:470px;left:50%;transform:translateX(-50%);font:600 20px Inter;text-shadow:0 2px 6px #000;white-space:nowrap">
+    <span class="key">E</span>Hold to rebuild barrier <span style="color:var(--gold)">+10</span>
+  </div>
+  <!-- perks -->
+  <div class="abs" style="left:36px;bottom:178px;display:flex;gap:8px">
+    <div style="width:40px;height:40px;border-radius:8px;background:#5a0d10;border:2px solid #e2453f;display:flex;align-items:center;justify-content:center">
+      <svg width="22" height="26" viewBox="0 0 22 26"><rect x="7" y="0" width="8" height="5" fill="#e9e2d0"/><path d="M4 6h14l2 6v12H2V12z" fill="#e2453f"/><rect x="5" y="13" width="12" height="6" fill="#f2eee6"/></svg>
+    </div>
+  </div>
+  <!-- points -->
+  <div class="abs cond" style="left:36px;bottom:126px;font-size:40px;color:var(--gold);text-shadow:0 2px 8px #000">2,340</div>
+  <div class="abs cond" style="left:160px;bottom:150px;font-size:24px;color:var(--gold);opacity:.95">+100</div>
+  <div class="abs cond" style="left:150px;bottom:176px;font-size:20px;color:var(--gold);opacity:.6">+60</div>
+  <!-- round tally -->
+  <svg class="abs" style="left:28px;bottom:24px" width="150" height="100" viewBox="0 0 150 100">
+    <g stroke="#C2161B" stroke-width="9" stroke-linecap="round" fill="none" filter="drop-shadow(0 0 6px rgba(194,22,27,.8))">
+      <path d="M16 14 Q19 50 14 88"/><path d="M42 12 Q45 52 40 90"/><path d="M68 16 Q66 50 70 86"/><path d="M94 12 Q97 48 92 88"/>
+    </g>
+  </svg>
+  <!-- ammo -->
+  <div class="abs" style="right:40px;bottom:30px;text-align:right">
+    <div class="cond" style="font-size:16px;color:#bdb6aa">P9</div>
+    <div class="cond" style="font-size:52px;line-height:1"><span>6</span><span style="font-size:30px;color:#9a9389"> / 64</span></div>
+  </div>
+  <!-- badges -->
+  <div class="badge" style="left:676px;top:28px">1</div>
+  <div class="badge" style="left:676px;top:330px">2</div>
+  <div class="badge" style="left:410px;top:470px">3</div>
+  <div class="badge" style="left:84px;bottom:198px">4</div>
+  <div class="badge" style="left:230px;bottom:150px">5</div>
+  <div class="badge" style="left:156px;bottom:66px">6</div>
+  <div class="badge" style="right:200px;bottom:58px">7</div>
+  <div class="badge" style="left:20px;top:20px">8</div>
+</div>
+
+<!-- ============ MAIN MENU ============ -->
+<div class="view screen" id="menu">
+  <div class="exterior abs" style="inset:0"></div>
+  <div class="abs" style="left:90px;top:96px">
+    <div class="cond" style="font-size:118px;font-weight:700;line-height:1;letter-spacing:.06em;text-shadow:0 4px 24px rgba(0,0,0,.8)">Zombiez</div>
+    <div style="width:330px;height:6px;background:var(--red);margin:10px 0 8px"></div>
+    <div class="hint" style="font-size:18px;color:#b9b2a6">Survive the night.</div>
+  </div>
+  <div class="abs" style="left:90px;top:330px">
+    <div class="btn sel">Singleplayer</div>
+    <div class="btn dim">Multiplayer<span class="tag">Coming soon</span></div>
+    <div class="btn">Settings</div>
+    <div class="btn">High scores</div>
+  </div>
+  <div class="abs hint" style="left:90px;bottom:32px">v0.1 &middot; [Enter] select &middot; [&uarr;&darr;] move</div>
+  <div class="abs cond" style="right:48px;bottom:32px;font-size:18px;color:var(--gold)">Best: round 14</div>
+</div>
+
+<!-- ============ SELECT MAP ============ -->
+<div class="view screen" id="select">
+  <div class="exterior abs" style="inset:0;filter:blur(6px) brightness(.45)"></div>
+  <div class="abs cond hint" style="left:72px;top:48px;font-size:20px">&lsaquo; Back</div>
+  <div class="abs cond" style="left:72px;top:82px;font-size:56px;font-weight:600">Select map</div>
+  <div class="abs" style="left:72px;top:190px;display:flex;gap:32px">
+    <div style="width:420px;border:3px solid var(--gold);border-radius:8px;background:#0c0c0f;box-shadow:0 0 30px rgba(232,184,74,.25)">
+      <div class="thumb" style="height:236px;border-radius:5px 5px 0 0;overflow:hidden;position:relative"></div>
+      <div style="padding:18px 20px 22px">
+        <div class="cond" style="font-size:32px">The Farmhouse</div>
+        <div class="hint" style="margin-top:4px">4 zones &middot; 8 windows &middot; 3 doors</div>
+        <div class="cond" style="margin-top:14px;font-size:18px;color:var(--gold)">Best: round 14</div>
+      </div>
+    </div>
+    <div style="width:420px;height:378px;border:2px dashed #3d3832;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#5d5850">
+      <div class="cond" style="font-size:28px">More maps</div>
+      <div class="hint" style="margin-top:6px;color:#5d5850">Coming with the map editor</div>
+    </div>
+  </div>
+  <div class="abs hint" style="left:72px;bottom:36px">[Esc] Back &nbsp;&nbsp; [Enter] Select</div>
+</div>
+
+<!-- ============ CONFIRM ============ -->
+<div class="view screen" id="confirm">
+  <div class="exterior abs" style="inset:0;filter:blur(6px) brightness(.4)"></div>
+  <div class="abs cond hint" style="left:72px;top:48px;font-size:20px">&lsaquo; Back</div>
+  <div class="abs panel" style="left:72px;top:96px;width:1136px;height:540px;display:flex">
+    <div class="thumb" style="width:620px;height:100%;border-radius:6px 0 0 6px;overflow:hidden;position:relative"></div>
+    <div style="flex:1;padding:40px 44px;display:flex;flex-direction:column">
+      <div class="cond" style="font-size:48px;font-weight:600;line-height:1.05">The Farmhouse</div>
+      <div class="hint" style="margin-top:10px;font-size:17px;line-height:1.5">An old farmhouse at night. The power is out. Hold the ground floor, then buy your way up.</div>
+      <div class="cond" style="margin-top:30px;font-size:15px;color:#9a9389">Mode</div>
+      <div style="display:flex;margin-top:8px;border:2px solid #4d4840;border-radius:6px;overflow:hidden">
+        <div class="cond" style="flex:1;text-align:center;padding:10px;background:var(--gold);color:#111;font-size:18px">Normal</div>
+        <div class="cond" style="flex:1;text-align:center;padding:10px;font-size:18px;color:#b9b2a6">Daily seed &middot; Oct 9</div>
+      </div>
+      <div class="cond" style="margin-top:24px;font-size:18px;color:var(--gold)">Best: round 14</div>
+      <div style="flex:1"></div>
+      <div style="display:flex;gap:14px">
+        <div class="cond" style="padding:14px 26px;border:2px solid #4d4840;border-radius:6px;font-size:22px;color:#b9b2a6">Back</div>
+        <div class="cond" style="flex:1;text-align:center;padding:14px 26px;background:var(--red);border-radius:6px;font-size:24px;font-weight:600;box-shadow:0 0 24px rgba(194,22,27,.5)">Confirm &middot; Start</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAUSE ============ -->
+<div class="view screen" id="pause">
+  <div class="scene abs" style="inset:0;filter:blur(5px) brightness(.45)"></div>
+  <div class="abs panel" style="left:50%;top:50%;transform:translate(-50%,-50%);width:420px;padding:36px 40px">
+    <div class="cond" style="font-size:52px;font-weight:600">Paused</div>
+    <div class="hint" style="margin:4px 0 22px">Round 4 &middot; 2,340 points</div>
+    <div class="btn sel" style="font-size:28px">Resume</div>
+    <div class="btn" style="font-size:28px">Settings</div>
+    <div class="btn" style="font-size:28px">Quit to menu</div>
+  </div>
+  <div class="abs hint" style="left:50%;bottom:36px;transform:translateX(-50%)">Solo only. Co-op does not pause.</div>
+</div>
+
+<!-- ============ GAME OVER ============ -->
+<div class="view screen" id="gameover">
+  <div class="scene abs" style="inset:0;filter:blur(6px) brightness(.35) sepia(.6) hue-rotate(-30deg) saturate(2)"></div>
+  <div class="abs" style="left:0;right:0;top:70px;text-align:center">
+    <div class="cond" style="font-size:30px;color:#c9a9a6;letter-spacing:.2em">Game over</div>
+    <div class="cond" style="font-size:84px;font-weight:700;line-height:1.1">You survived <span style="color:var(--red)">14</span> rounds</div>
+    <div class="cond" style="display:inline-block;margin-top:10px;padding:4px 14px;border:2px solid var(--gold);color:var(--gold);font-size:18px;border-radius:4px">New best</div>
+  </div>
+  <div class="abs panel" style="left:50%;top:330px;transform:translateX(-50%);width:760px;padding:26px 34px;display:grid;grid-template-columns:repeat(3,1fr);gap:22px 30px">
+    <div><div class="hint">Kills</div><div class="cond" style="font-size:38px">312</div></div>
+    <div><div class="hint">Headshots</div><div class="cond" style="font-size:38px">88 <span style="font-size:20px;color:#9a9389">28%</span></div></div>
+    <div><div class="hint">Points earned</div><div class="cond" style="font-size:38px;color:var(--gold)">41,250</div></div>
+    <div><div class="hint">Time</div><div class="cond" style="font-size:38px">38:12</div></div>
+    <div><div class="hint">Doors opened</div><div class="cond" style="font-size:38px">3 / 3</div></div>
+    <div><div class="hint">Boards rebuilt</div><div class="cond" style="font-size:38px">96</div></div>
+  </div>
+  <div class="abs" style="left:50%;top:580px;transform:translateX(-50%);display:flex;gap:16px">
+    <div class="cond" style="padding:14px 54px;background:var(--gold);color:#111;border-radius:6px;font-size:26px;font-weight:600;box-shadow:0 0 0 3px #111, 0 0 0 5px var(--gold)">Again</div>
+    <div class="cond" style="padding:14px 34px;border:2px solid #4d4840;border-radius:6px;font-size:24px;color:#b9b2a6">Main menu</div>
+  </div>
+  <div class="abs hint" style="left:50%;bottom:28px;transform:translateX(-50%)">[Enter] Again &nbsp;&nbsp; [Esc] Main menu</div>
+</div>
+
+<!-- ============ ASSET SHEET ============ -->
+<div class="view" id="assets" style="width:1280px;height:1330px;background:#121214;padding:36px 40px">
+  <div class="cond" style="font-size:28px;margin-bottom:6px">Asset sheet &middot; v1 targets</div>
+  <div class="hint" style="margin-bottom:20px">Low-poly, flat-shaded, vertex colours. Shapes are the target silhouette, not final models.</div>
+  <div id="sheet"></div>
+</div>
+
+<!-- ============ FLOOR PLANS ============ -->
+<div class="view" id="plans" style="width:1280px;height:760px;background:#101318;padding:32px 36px">
+  <div class="cond" style="font-size:28px">The Farmhouse &middot; floor plans</div>
+  <div class="hint" style="margin-bottom:12px">1 grid square = 1 m. Red dots = zombie spawns outside each window.</div>
+  <div id="plansvg"></div>
+</div>
+
+<script>
+const C = { fog:'#1B2433', fogDeep:'#0E131C', moon:'#8FA6C8', lamp:'#E89A3C', wood:'#5A3B26', plaster:'#4A3B2C',
+  skin:'#6E7B5C', eyes:'#F2D35B', gold:'#E8B84A', red:'#C2161B', blood:'#7A0F12', power:'#5CFF8A', ink:'#F2EEE6' };
+
+// ---------- palette ----------
+const sw = [
+  ['Fog', C.fog, 'Outside, sky, menus'], ['Fog deep', C.fogDeep, 'Shadows, UI panels'], ['Moonlight', C.moon, 'Outside light'],
+  ['Lamp', C.lamp, 'Inside light, warmth'], ['Wood', C.wood, 'Boards, floors, crates'], ['Plaster', C.plaster, 'Inside walls'],
+  ['Zombie skin', C.skin, 'All zombies'], ['Zombie eyes', C.eyes, 'Glow, seen in fog'], ['Gold', C.gold, 'Points, buyables, focus'],
+  ['Red', C.red, 'Round number, danger, CTA'], ['Blood', C.blood, 'Hits, damage edges'], ['Power-up', C.power, 'Drops, active timers'],
+];
+document.getElementById('swatches').innerHTML = sw.map(([n,h,u]) => `
+  <div><div style="height:96px;border-radius:6px;background:${h};border:1px solid #333"></div>
+  <div style="font:600 15px Inter;margin-top:8px">${n}</div>
+  <div style="font:400 13px Inter;color:#9a9389">${h} &middot; ${u}</div></div>`).join('');
+
+// ---------- interior scene (HUD, pause, game over) ----------
+const zombie = (x, y, s, lean = 0) => `
+  <g transform="translate(${x},${y}) scale(${s}) rotate(${lean})">
+    <rect x="-16" y="40" width="13" height="58" fill="#2a2a33"/><rect x="3" y="40" width="13" height="58" fill="#24242c"/>
+    <path d="M-24 -10 L24 -10 L20 44 L-20 44 Z" fill="#3b3a45"/>
+    <path d="M-24 -10 L0 -10 L-4 44 L-20 44 Z" fill="#45434f"/>
+    <path d="M-12 30 L-2 20 L4 36 L12 26 L18 44 L-18 44Z" fill="${C.blood}" opacity=".7"/>
+    <rect x="-46" y="-6" width="24" height="11" fill="${C.skin}" transform="rotate(-8)"/>
+    <rect x="22" y="-4" width="26" height="11" fill="#5f6b4f" transform="rotate(6)"/>
+    <rect x="-12" y="-44" width="24" height="30" fill="${C.skin}"/><rect x="-12" y="-44" width="11" height="30" fill="#7c8a68"/>
+    <rect x="-7" y="-34" width="5" height="4" fill="${C.eyes}"/><rect x="3" y="-34" width="5" height="4" fill="${C.eyes}"/>
+    <circle cx="-4.5" cy="-32" r="7" fill="${C.eyes}" opacity=".25"/><circle cx="5.5" cy="-32" r="7" fill="${C.eyes}" opacity=".25"/>
+    <rect x="-6" y="-22" width="12" height="3" fill="#2a1a1a"/>
+  </g>`;
+
+const scene = `
+<svg viewBox="0 0 1280 720" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="out" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b111b"/><stop offset="1" stop-color="#2c3d57"/></linearGradient>
+    <radialGradient id="lamp" cx="1030" cy="250" r="520" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${C.lamp}" stop-opacity=".55"/><stop offset="1" stop-color="${C.lamp}" stop-opacity="0"/></radialGradient>
+    <radialGradient id="vig" cx="640" cy="380" r="760" gradientUnits="userSpaceOnUse"><stop offset=".45" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".85"/></radialGradient>
+    <linearGradient id="floorfog" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${C.moon}" stop-opacity=".25"/><stop offset="1" stop-color="${C.moon}" stop-opacity="0"/></linearGradient>
+  </defs>
+  <polygon points="0,0 1280,0 900,200 380,200" fill="#140f0b"/>
+  <polygon points="0,0 380,200 380,470 0,720" fill="#33281d"/>
+  <polygon points="1280,0 900,200 900,470 1280,720" fill="#3d3024"/>
+  <rect x="380" y="200" width="520" height="270" fill="${C.plaster}"/>
+  <polygon points="0,720 380,470 900,470 1280,720" fill="#2a1e14"/>
+  <g stroke="#1d140d" stroke-width="2">${[0,1,2,3,4,5,6,7,8].map(i=>{const t=i/8;return `<line x1="${380+520*t}" y1="470" x2="${-120+1520*t}" y2="720"/>`}).join('')}</g>
+  <!-- window -->
+  <rect x="556" y="246" width="168" height="158" fill="#1e150e"/>
+  <rect x="566" y="256" width="148" height="138" fill="url(#out)"/>
+  <circle cx="690" cy="276" r="12" fill="#c8d4e6" opacity=".7"/>
+  ${zombie(628, 330, 1.05, 0)}
+  <g fill="${C.wood}" stroke="#2c1d12" stroke-width="2">
+    <rect x="552" y="276" width="176" height="18" transform="rotate(-8 640 285)"/>
+    <rect x="552" y="352" width="176" height="18" transform="rotate(5 640 361)"/>
+    <rect x="552" y="318" width="176" height="16" transform="rotate(-3 640 326)"/>
+  </g>
+  <g fill="#4a3020"><rect x="600" y="470" width="80" height="12" transform="rotate(12 640 476)"/><rect x="560" y="480" width="70" height="11" transform="rotate(-20 595 485)"/></g>
+  <rect x="566" y="394" width="148" height="10" fill="url(#floorfog)"/>
+  <!-- wall buy chalk on left wall -->
+  <g transform="translate(150,300) skewY(28)" fill="none" stroke="#e8e2d0" stroke-width="3" opacity=".85">
+    <path d="M0 0h120v18h-30l-10 30h-16l6-30H40l-6 14H18l4-14H0z"/><path d="M120 6h28"/>
+  </g>
+  <g transform="translate(150,300) skewY(28)" fill="none" stroke="${C.gold}" stroke-width="8" opacity=".25">
+    <path d="M0 0h120v18h-30l-10 30h-16l6-30H40l-6 14H18l4-14H0z"/>
+  </g>
+  <!-- lamp -->
+  <rect x="1010" y="230" width="34" height="40" fill="#f6c27a"/><rect x="1020" y="270" width="14" height="60" fill="#2a1e14"/>
+  <rect x="0" y="0" width="1280" height="720" fill="url(#lamp)"/>
+  <!-- zombie inside -->
+  ${zombie(470, 360, 2.0, -6)}
+  <!-- viewmodel -->
+  <g transform="translate(860,500)">
+    <polygon points="140,60 330,10 380,40 380,90 180,140" fill="#2b2d31"/>
+    <polygon points="140,60 330,10 340,20 150,72" fill="#43464c"/>
+    <polygon points="230,110 300,92 360,220 270,240" fill="#1b1c1f"/>
+    <polygon points="200,120 330,90 420,260 260,300" fill="#3a2b22"/>
+    <polygon points="200,120 260,106 300,280 260,300" fill="#4a382c"/>
+  </g>
+  <rect x="0" y="0" width="1280" height="720" fill="url(#vig)"/>
+</svg>`;
+document.querySelectorAll('.scene').forEach(e => e.innerHTML = scene);
+
+// ---------- exterior (menus) ----------
+const exterior = `
+<svg viewBox="0 0 1280 720" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#05080d"/><stop offset=".7" stop-color="${C.fog}"/><stop offset="1" stop-color="#34445e"/></linearGradient>
+    <radialGradient id="win" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="${C.lamp}" stop-opacity=".9"/><stop offset="1" stop-color="${C.lamp}" stop-opacity="0"/></radialGradient>
+    <linearGradient id="mist" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${C.moon}" stop-opacity="0"/><stop offset="1" stop-color="${C.moon}" stop-opacity=".35"/></linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#sky)"/>
+  <circle cx="1080" cy="120" r="46" fill="#cfd9e8" opacity=".85"/><circle cx="1080" cy="120" r="110" fill="#cfd9e8" opacity=".08"/>
+  <g stroke="#8FA6C8" stroke-width="1" opacity=".25">${Array.from({length:90},(_,i)=>{const x=(i*137)%1300,y=(i*71)%700;return `<line x1="${x}" y1="${y}" x2="${x-8}" y2="${y+26}"/>`}).join('')}</g>
+  <!-- house -->
+  <g transform="translate(700,250)">
+    <polygon points="0,140 190,20 380,140" fill="#0a0d12"/>
+    <rect x="20" y="140" width="340" height="230" fill="#0d1118"/>
+    <rect x="300" y="60" width="26" height="70" fill="#0a0d12"/>
+    <rect x="62" y="190" width="56" height="60" fill="${C.lamp}"/><rect x="62" y="190" width="56" height="60" fill="none" stroke="#0d1118" stroke-width="6"/>
+    <rect x="58" y="205" width="64" height="8" fill="#3a2616" transform="rotate(-10 90 209)"/><rect x="58" y="230" width="64" height="8" fill="#3a2616" transform="rotate(6 90 234)"/>
+    <ellipse cx="90" cy="220" rx="120" ry="90" fill="url(#win)" opacity=".35"/>
+    <rect x="250" y="190" width="56" height="60" fill="#141a24"/>
+    <rect x="160" y="80" width="50" height="46" fill="#141a24"/>
+    <rect x="160" y="270" width="52" height="100" fill="#1a1410"/>
+  </g>
+  <rect x="0" y="600" width="1280" height="120" fill="#06080c"/>
+  <g fill="#06080c">${[[600,600,40],[640,612,26],[1140,600,60],[1200,610,30]].map(([x,y,r])=>`<circle cx="${x}" cy="${y}" r="${r}"/>`).join('')}</g>
+  ${zombie(560, 560, 1.1, 4)}${zombie(1150, 570, 0.9, -5)}${zombie(980, 590, 0.7, 3)}
+  <rect x="0" y="460" width="1280" height="260" fill="url(#mist)"/>
+  <rect width="1280" height="720" fill="url(#sky)" opacity=".12"/>
+</svg>`;
+document.querySelectorAll('.exterior').forEach(e => e.innerHTML = exterior);
+document.querySelectorAll('.thumb').forEach(e => e.innerHTML = exterior.replace('width="100%" height="100%"','width="100%" height="100%" style="transform:scale(1.6);transform-origin:70% 60%"'));
+
+// ---------- asset sheet ----------
+const tile = (label, sub, svg, w = 180) => `
+  <div style="width:${w}px"><div style="height:150px;background:#1b1d22;border:1px solid #2a2d33;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden">${svg}</div>
+  <div style="font:600 14px Inter;margin-top:6px">${label}</div><div style="font:400 12px Inter;color:#8b8478">${sub}</div></div>`;
+const row = (title, tiles) => `<div class="cond" style="font-size:16px;color:#9a9389;margin:14px 0 8px">${title}</div><div style="display:flex;gap:14px;flex-wrap:wrap">${tiles.join('')}</div>`;
+const winTile = n => `<svg width="140" height="130" viewBox="0 0 140 130"><rect x="10" y="5" width="120" height="120" fill="#1e150e"/><rect x="20" y="15" width="100" height="100" fill="#22314a"/>
+  ${[22,36,50,64,78,92].slice(0,n).map((y,i)=>`<rect x="6" y="${y}" width="128" height="11" fill="${C.wood}" stroke="#2c1d12" stroke-width="2" transform="rotate(${i%2?4:-5} 70 ${y+5})"/>`).join('')}
+  ${n===0?`<rect x="58" y="40" width="22" height="26" fill="${C.skin}"/><rect x="62" y="48" width="4" height="3" fill="${C.eyes}"/><rect x="71" y="48" width="4" height="3" fill="${C.eyes}"/>`:''}</svg>`;
+const gun = (d, label, sub) => tile(label, sub, `<svg width="160" height="80" viewBox="0 0 160 80"><path d="${d}" fill="#c9c3b6"/></svg>`, 148);
+document.getElementById('sheet').innerHTML =
+  row('Zombies', [
+    tile('Walker', 'Rounds 1-3. Arms forward, slow.', `<svg width="120" height="150" viewBox="-60 -60 120 170">${zombie(0,0,1,0)}</svg>`),
+    tile('Runner', 'Rounds 4+. Leans forward.', `<svg width="120" height="150" viewBox="-60 -60 120 170">${zombie(0,0,1,14)}</svg>`),
+    tile('Hit flinch', 'Blood puff at hit point', `<svg width="120" height="150" viewBox="-60 -60 120 170">${zombie(0,0,1,-12)}<circle cx="6" cy="10" r="14" fill="${C.blood}" opacity=".85"/><circle cx="16" cy="2" r="7" fill="${C.blood}" opacity=".6"/></svg>`),
+    tile('Headshot', 'Head pops, louder sound', `<svg width="120" height="150" viewBox="-60 -60 120 170">${zombie(0,0,1,0).replace(/<rect x="-12" y="-44"[^>]*\/><rect x="-12" y="-44"[^>]*\/>/,'')}<circle cx="0" cy="-30" r="18" fill="${C.blood}" opacity=".8"/></svg>`),
+  ]) +
+  row('Window barricade states', [6,4,2,1,0].map(n => tile(`${n} board${n===1?'':'s'}`, n===6?'Full':n===0?'Zombie climbs in':'Tear 1 per 1.5 s', winTile(n), 160))) +
+  row('Buyables and interactables (gold outline when looked at)', [
+    tile('Wall buy', 'Chalk outline + price', `<svg width="150" height="120" viewBox="0 0 150 120"><rect width="150" height="120" fill="#3d3024"/><g fill="none" stroke="#e8e2d0" stroke-width="3" transform="translate(14,34)"><path d="M0 0h96v14h-24l-8 24h-13l5-24H32l-5 11H14l3-11H0z"/><path d="M96 5h24"/></g><text x="75" y="105" text-anchor="middle" fill="#e8e2d0" font-family="Oswald" font-size="18">1000</text></svg>`, 170),
+    tile('Door debris', 'Planks, chairs. Gone when bought.', `<svg width="150" height="130" viewBox="0 0 150 130"><rect x="25" y="5" width="100" height="125" fill="#1a1410"/><g fill="${C.wood}" stroke="#2c1d12" stroke-width="2"><rect x="10" y="40" width="130" height="12" transform="rotate(20 75 46)"/><rect x="10" y="70" width="130" height="12" transform="rotate(-18 75 76)"/><rect x="40" y="90" width="40" height="36"/><rect x="85" y="96" width="34" height="30" transform="rotate(10 100 110)"/></g><rect x="25" y="5" width="100" height="125" fill="none" stroke="${C.gold}" stroke-width="3" opacity=".7"/></svg>`, 170),
+    tile('Mystery box', '950. Moves after 4-8 uses.', `<svg width="150" height="130" viewBox="0 0 150 130"><ellipse cx="75" cy="64" rx="70" ry="50" fill="${C.gold}" opacity=".15"/><polygon points="15,60 105,60 135,40 45,40" fill="#8a6338"/><rect x="15" y="60" width="90" height="56" fill="${C.wood}"/><polygon points="105,60 135,40 135,96 105,116" fill="#4a3020"/><text x="60" y="100" text-anchor="middle" font-family="Oswald" font-size="36" fill="${C.gold}">?</text><rect x="45" y="20" width="60" height="20" fill="${C.gold}" opacity=".35"/></svg>`, 170),
+    tile('Perk: Tough Juice', '2500. Red machine.', `<svg width="90" height="140" viewBox="0 0 90 140"><rect x="10" y="10" width="70" height="125" rx="4" fill="#5a0d10"/><rect x="18" y="20" width="54" height="40" fill="#e2453f"/><rect x="24" y="72" width="42" height="36" fill="#1a0a0a"/><rect x="34" y="80" width="10" height="20" fill="#e2453f"/><rect x="48" y="80" width="10" height="20" fill="#e2453f"/><text x="45" y="46" text-anchor="middle" font-family="Oswald" font-size="13" fill="#fff">TOUGH</text></svg>`, 150),
+    tile('Perk: Quick Hands', '3000. Teal machine.', `<svg width="90" height="140" viewBox="0 0 90 140"><rect x="10" y="10" width="70" height="125" rx="4" fill="#0b4a4a"/><rect x="18" y="20" width="54" height="40" fill="#2ec4b6"/><rect x="24" y="72" width="42" height="36" fill="#071c1c"/><rect x="34" y="80" width="10" height="20" fill="#2ec4b6"/><rect x="48" y="80" width="10" height="20" fill="#2ec4b6"/><text x="45" y="46" text-anchor="middle" font-family="Oswald" font-size="13" fill="#fff">QUICK</text></svg>`, 150),
+    tile('Power switch', 'Cellar. Turns on perks.', `<svg width="100" height="130" viewBox="0 0 100 130"><rect x="20" y="10" width="60" height="110" fill="#2a2d33"/><rect x="30" y="30" width="40" height="60" fill="#15171b"/><rect x="45" y="20" width="10" height="50" fill="#9a9389" transform="rotate(-25 50 70)"/><circle cx="50" cy="70" r="8" fill="${C.red}"/></svg>`, 150),
+  ]) +
+  row('Power-up drops (spin, bright green glow)', [
+    ['Max Ammo', `<rect x="20" y="30" width="60" height="40" fill="none" stroke="${C.power}" stroke-width="5"/><g fill="${C.power}"><rect x="30" y="16" width="8" height="18"/><rect x="46" y="16" width="8" height="18"/><rect x="62" y="16" width="8" height="18"/></g>`],
+    ['Insta-Kill', `<circle cx="50" cy="42" r="26" fill="${C.power}"/><rect x="36" y="62" width="28" height="16" fill="${C.power}"/><circle cx="40" cy="40" r="7" fill="#121214"/><circle cx="60" cy="40" r="7" fill="#121214"/>`],
+    ['Double Points', `<text x="50" y="66" text-anchor="middle" font-family="Oswald" font-size="52" font-weight="700" fill="${C.power}">x2</text>`],
+    ['Nuke', `<circle cx="46" cy="54" r="26" fill="${C.power}"/><rect x="58" y="18" width="10" height="16" fill="${C.power}" transform="rotate(30 63 26)"/><circle cx="74" cy="16" r="5" fill="${C.gold}"/>`],
+  ].map(([n,s]) => tile(n, '', `<svg width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="${C.power}" opacity=".12"/>${s}</svg>`, 140))) +
+  row('Weapons (side silhouettes)', [
+    gun('M30 30h60v12H70l-6 22H50l4-22H30z', 'P9', 'Pistol, start'),
+    gun('M10 30h100v14H86l-4 26H70l2-26H50l-6 12H34l4-12H10z M110 34h30v6h-30z', 'Ripper', 'SMG, wall 1000'),
+    gun('M5 32h130v10H90l-30 10-8 20H36l6-24H5z M60 42h40v8H60z', 'Barnburner', 'Shotgun, wall 1200'),
+    gun('M0 34h150v8H80l-6 6-10 24H50l8-24H0z M60 24h30v8H60z', 'Longshot', 'Bolt rifle, wall 1500'),
+    gun('M5 30h120v14H90l-6 26H72l2-26H58l-4 18H44l2-18H5z M125 34h30v6h-30z', 'Thumper', 'Auto rifle, box'),
+    gun('M20 26h100v24H80l-6 22H60l4-22H20z', 'Bucket', 'Launcher, box'),
+    gun('M30 24h80l20 12-20 12H80l-6 22H62l4-22H30z', 'Zapper', 'Energy, box rare').replace('#c9c3b6', C.power),
+  ]);
+
+// ---------- floor plans ----------
+const U = 26; // px per metre
+const g = (x, y, w, h) => `<g stroke="#1f2733" stroke-width="1">${Array.from({length:w+1},(_,i)=>`<line x1="${x+i*U}" y1="${y}" x2="${x+i*U}" y2="${y+h*U}"/>`).join('')}${Array.from({length:h+1},(_,i)=>`<line x1="${x}" y1="${y+i*U}" x2="${x+w*U}" y2="${y+i*U}"/>`).join('')}</g>`;
+const room = (x, y, w, h, fill) => `<rect x="${x}" y="${y}" width="${w*U}" height="${h*U}" fill="${fill}" stroke="#c9c3b6" stroke-width="5"/>`;
+const win = (x1, y1, x2, y2, id, dir) => { const mx = (x1+x2)/2, my = (y1+y2)/2, o = 0.8*U;
+  const [sx, sy] = {n:[mx, my-o], s:[mx, my+o], w:[mx-o, my], e:[mx+o, my]}[dir];
+  const [tx, ty] = {n:[mx, my+22], s:[mx, my-12], w:[mx+24, my+5], e:[mx-24, my+5]}[dir];
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#7fb0ff" stroke-width="9"/><circle cx="${sx}" cy="${sy}" r="7" fill="${C.red}"/><text x="${tx}" y="${ty}" text-anchor="middle" font-family="Inter" font-size="13" font-weight="600" fill="#7fb0ff">${id}</text>`; };
+const door = (x, y, w, h, cost) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${C.wood}" stroke="${C.gold}" stroke-width="3"/><text x="${x+w/2}" y="${y+h/2+5}" text-anchor="middle" font-family="Oswald" font-size="14" fill="${C.gold}">${cost}</text>`;
+const icon = (x, y, color, label, sym) => `<g transform="translate(${x},${y})"><rect x="-13" y="-13" width="26" height="26" rx="5" fill="${color}"/><text y="5" text-anchor="middle" font-family="Oswald" font-size="15" font-weight="700" fill="#111">${sym}</text><text y="30" text-anchor="middle" font-family="Inter" font-size="12" fill="#c9c3b6">${label}</text></g>`;
+const stairs = (x, y, w, h, label) => `<g>${Array.from({length:6},(_,i)=>`<rect x="${x}" y="${y+i*h/6}" width="${w}" height="${h/6}" fill="#2a2d33" stroke="#4a4f58"/>`).join('')}<text x="${x+w/2}" y="${y+h/2+4}" text-anchor="middle" font-family="Inter" font-size="12" font-weight="600" fill="#c9c3b6">${label}</text></g>`;
+const title = (x, y, t, s) => `<text x="${x}" y="${y}" font-family="Oswald" font-size="22" fill="${C.ink}">${t.toUpperCase()}</text><text x="${x}" y="${y+20}" font-family="Inter" font-size="13" fill="#9a9389">${s}</text>`;
+
+const ax = 20, ay = 90;   // ground
+const bx = 450, by = 90;  // upstairs
+const cx = 880, cy = 90;  // cellar
+document.getElementById('plansvg').innerHTML = `<svg width="1208" height="640" viewBox="0 0 1208 640">
+  ${title(ax, 30, 'Ground floor · Zone A', 'Start. 3 windows.')}
+  ${g(ax, ay, 14, 16)}${room(ax+U, ay+U, 12, 14, 'rgba(232,154,60,.10)')}
+  <line x1="${ax+U}" y1="${ay+8*U}" x2="${ax+7*U}" y2="${ay+8*U}" stroke="#c9c3b6" stroke-width="5"/>
+  ${win(ax+4*U, ay+U, ax+7*U, ay+U, 'W1', 'n')}
+  ${win(ax+U, ay+3*U, ax+U, ay+6*U, 'W2', 'w')}
+  ${win(ax+13*U, ay+10*U, ax+13*U, ay+13*U, 'W3', 'e')}
+  ${stairs(ax+10*U, ay+1.5*U, 2.5*U, 4*U, 'up')}
+  ${door(ax+9.5*U, ay+5.6*U, 3.5*U, 0.8*U, '750')}
+  ${stairs(ax+1.5*U, ay+10*U, 2.5*U, 4*U, 'down')}
+  ${door(ax+1.2*U, ay+9.2*U, 3.1*U, 0.8*U, '1000')}
+  ${icon(ax+7*U, ay+11*U, '#F2EEE6', 'Spawn', '★')}
+  ${icon(ax+12.6*U, ay+4*U, C.gold, 'Ripper', 'W')}
+  <text x="${ax+3*U}" y="${ay+5*U}" font-family="Inter" font-size="12" fill="#9a9389">Kitchen</text>
+  <text x="${ax+6*U}" y="${ay+14.2*U}" font-family="Inter" font-size="12" fill="#9a9389">Living room</text>
+
+  ${title(bx, 30, 'Upstairs · Zones B + D', 'B: 2 windows. D (balcony): 1 window.')}
+  ${g(bx, ay, 14, 16)}${room(bx+U, by+U, 12, 10, 'rgba(143,166,200,.08)')}${room(bx+4*U, by+11*U, 6, 4, 'rgba(143,166,200,.14)')}
+  ${win(bx+U, by+3*U, bx+U, by+6*U, 'W4', 'w')}
+  ${win(bx+5*U, by+U, bx+8*U, by+U, 'W5', 'n')}
+  ${win(bx+10*U, by+12*U, bx+10*U, by+14*U, 'W6', 'e')}
+  ${stairs(bx+10*U, by+1.5*U, 2.5*U, 4*U, 'down')}
+  ${door(bx+5*U, by+10.6*U, 4*U, 0.8*U, '1250')}
+  ${icon(bx+3*U, by+8.5*U, C.gold, 'Barnburner', 'W')}
+  ${icon(bx+7*U, by+5*U, C.gold, 'Box 1', '?')}
+  ${icon(bx+5.4*U, by+13*U, '#2ec4b6', 'Quick Hands', 'P')}
+  ${icon(bx+7.8*U, by+13*U, C.gold, 'Box 2', '?')}
+  <text x="${bx+4.2*U}" y="${by+15.6*U}" font-family="Inter" font-size="12" fill="#9a9389">Balcony (D)</text>
+
+  ${title(cx, 30, 'Cellar · Zone C', '2 small windows. Power + Tough Juice.')}
+  ${g(cx, ay, 12, 16)}${room(cx+U, cy+U, 10, 14, 'rgba(194,22,27,.07)')}
+  ${win(cx+4*U, cy+U, cx+6*U, cy+U, 'W7', 'n')}
+  ${win(cx+11*U, cy+9*U, cx+11*U, cy+11*U, 'W8', 'e')}
+  ${stairs(cx+1.5*U, cy+10*U, 2.5*U, 4*U, 'up')}
+  ${icon(cx+8*U, cy+3.5*U, C.gold, 'Longshot', 'W')}
+  ${icon(cx+3*U, cy+3.5*U, C.red, 'Power', '⚡')}
+  ${icon(cx+8*U, cy+12.5*U, '#e2453f', 'Tough Juice', 'P')}
+
+  <g transform="translate(0,600)" font-family="Inter" font-size="13" fill="#c9c3b6">
+    <line x1="20" y1="10" x2="50" y2="10" stroke="#7fb0ff" stroke-width="9"/><text x="60" y="15">Window</text>
+    <circle cx="150" cy="10" r="7" fill="${C.red}"/><text x="164" y="15">Zombie spawn</text>
+    <rect x="270" y="0" width="40" height="20" fill="${C.wood}" stroke="${C.gold}" stroke-width="3"/><text x="320" y="15">Door (cost)</text>
+    <rect x="420" y="-3" width="26" height="26" rx="5" fill="${C.gold}"/><text x="456" y="15">Wall buy / box</text>
+    <rect x="580" y="-3" width="26" height="26" rx="5" fill="#2ec4b6"/><text x="616" y="15">Perk</text>
+    <rect x="670" y="0" width="30" height="20" fill="#2a2d33" stroke="#4a4f58"/><text x="710" y="15">Stairs</text>
+  </g>
+</svg>`;
+
+// ---------- view switch ----------
+const id = location.hash.slice(1) || 'hud';
+document.getElementById(id).classList.add('on');
+</script>
+</body>
+</html>
