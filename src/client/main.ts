@@ -1,4 +1,4 @@
-import { mapById } from '../maps';
+import { BLURBS, MAPS, mapById } from '../maps';
 import { NO_INPUT, Sim, TICK, type Command, type GameEvent } from '../sim/game';
 import { WEAPONS } from '../sim/weapons';
 import { NetClient } from '../net/client';
@@ -8,7 +8,7 @@ import { Sound } from './audio';
 import { initLobbyUi } from './lobby-ui';
 import { Renderer, type Snap } from './render';
 
-let map = mapById(new URLSearchParams(location.search).get('map'));
+let map = mapById(new URLSearchParams(location.search).get('map') ?? localStorage.getItem('zombiez.map'));
 /** The local player's id: 'p1' in solo, your name online. */
 let localId = 'p1';
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -25,7 +25,7 @@ const save = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON
 const settings = load('zombiez.settings', { sens: 1, vol: 0.8, fov: 85, invert: false, shake: false });
 type Score = { map: string; round: number; kills: number; mode: string; date: string };
 const loadScores = (): Score[] => { try { return JSON.parse(localStorage.getItem('zombiez.scores') ?? '[]'); } catch { return []; } };
-const bestRound = () => Math.max(0, ...loadScores().filter((s) => s.map === map.id).map((s) => s.round));
+const bestRound = (id = map.id) => Math.max(0, ...loadScores().filter((s) => s.map === id).map((s) => s.round));
 
 const today = () => {
   const d = new Date();
@@ -41,8 +41,19 @@ renderer.setFov(settings.fov);
 renderer.reduceShake = settings.shake;
 sound.setVolume(settings.vol);
 
-const menuSim = new Sim(map, 0);
+let menuSim = new Sim(map, 0);
 renderer.load(menuSim);
+/** Menu snapshots per map, taken while that map is behind the menu. */
+const thumbs: Record<string, string> = {};
+
+function chooseMap(id: string) {
+  if (id === map.id) return;
+  map = mapById(id);
+  try { localStorage.setItem('zombiez.map', map.id); } catch { /* private mode */ }
+  menuSim = new Sim(map, 0);
+  if (app === 'menu') { sim = menuSim; renderer.load(menuSim); }
+  renderer.thumbnail = null;
+}
 let sim: Sim = menuSim;
 let mode: 'normal' | 'daily' = 'normal';
 let app: 'menu' | 'playing' | 'paused' | 'over' = 'menu';
@@ -136,8 +147,13 @@ function show(id: string | null) {
   $$('.screen').forEach((s) => s.classList.toggle('on', s.id === id));
   $('#hud').classList.toggle('hidden', app === 'menu' || app === 'over');
   const best = bestRound();
-  $$('.best').forEach((b) => (b.textContent = best ? `Best: round ${best}` : ''));
-  if (renderer.thumbnail) $$('.thumb').forEach((t) => (t.style.backgroundImage = `url(${renderer.thumbnail})`));
+  $$('.best:not([data-map])').forEach((b) => (b.textContent = best ? `Best: round ${best}` : ''));
+  $$('.best[data-map]').forEach((b) => { const r = bestRound(b.dataset.map); b.textContent = r ? `Best: round ${r}` : ''; });
+  if (renderer.thumbnail) thumbs[map.id] = renderer.thumbnail;
+  $$('.thumb').forEach((t) => { const src = thumbs[t.dataset.map ?? map.id]; t.style.backgroundImage = src ? `url(${src})` : ''; });
+  $('#confirm-name').textContent = map.name;
+  $('#confirm-blurb').textContent = BLURBS[map.id] ?? '';
+  $$('#map-cards .card[data-map]').forEach((c) => c.classList.toggle('sel', c.dataset.map === map.id));
   if (id === 'menu-scores') renderScores();
   const first = id ? $(`#${id}`).querySelector<HTMLElement>('.card, .btn:not(:disabled), .primary, #again') : null;
   first?.focus();
@@ -151,7 +167,16 @@ function go(target: string) {
   if (target === 'leaderboard') void lobbyUi.openLeaderboard();
   show(`menu-${target}`);
 }
-$$('[data-go]').forEach((b) => b.addEventListener('click', () => { sound.start(); go(b.dataset.go!); }));
+$('#map-cards').insertAdjacentHTML('afterbegin', MAPS.map((m) => `
+  <button class="card" data-go="confirm" data-map="${m.id}">
+    <div class="thumb" data-map="${m.id}"></div>
+    <div class="card-body">
+      <div class="cond card-title">${m.name}</div>
+      <div class="hint">${m.floors.length} floors &middot; ${m.windows.length} windows &middot; ${m.doors.length} doors</div>
+      <div class="cond gold best" data-map="${m.id}"></div>
+    </div>
+  </button>`).join(''));
+$$('[data-go]').forEach((b) => b.addEventListener('click', () => { sound.start(); if (b.dataset.map) chooseMap(b.dataset.map); go(b.dataset.go!); }));
 
 function menuKeys(e: KeyboardEvent) {
   const scr = $$('.screen.on')[0];
@@ -262,6 +287,11 @@ function connect() {
   ws.onopen = () => o.net.join(o.matchId, o.token);
   ws.onmessage = (e) => {
     const m = JSON.parse(String(e.data)) as ServerMsg;
+    // The server says which map the match is on; start over on that map if it is not the one we guessed.
+    if (m.t === 'welcome' && m.map !== o.net.map.id && !o.started) {
+      const send = o.net.send;
+      o.net = new NetClient(mapById(m.map), send, () => performance.now());
+    }
     o.net.receive(m);
     if (m.t === 'welcome') {
       o.retryUntil = 0;
@@ -339,7 +369,7 @@ function gameOver() {
   const before = bestRound();
   if (!online) {
     const scores = loadScores();
-    scores.push({ map: map.id, round: s.round, kills: me.stats.kills, mode, date: today() });
+    scores.push({ map: sim.map.id, round: s.round, kills: me.stats.kills, mode, date: today() });
     save('zombiez.scores', scores);
   }
   $('#go-round').textContent = String(s.round);
@@ -354,7 +384,7 @@ function gameOver() {
     stat('Headshots', String(me.stats.headshots), `${pct}%`) +
     stat('Points earned', me.stats.earned.toLocaleString(), '', 'gold') +
     stat('Time', `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`) +
-    stat('Doors opened', `${opened} / ${map.doors.length}`) +
+    stat('Doors opened', `${opened} / ${sim.map.doors.length}`) +
     stat('Boards rebuilt', String(me.stats.boards));
   $('#go-share').textContent = mode === 'daily' ? `Zombiez daily ${today()}: round ${s.round}, ${me.stats.kills} kills` : '[Enter] Again    [Esc] Main menu';
   show('gameover');
@@ -528,7 +558,7 @@ function frame(now: number) {
   const cam = renderer.camera.position;
   sound.update(dt, sim, localId, { x: cam.x, y: cam.y, z: cam.z, yaw: app === 'menu' ? 0 : yaw }, moving, keys.has('ShiftLeft'));
   if (app !== 'menu') updateHud(dt);
-  if (app === 'menu' && renderer.thumbnail && !$('.thumb').style.backgroundImage) show($$('.screen.on')[0]?.id ?? 'menu-main');
+  if (app === 'menu' && renderer.thumbnail && !thumbs[map.id]) show($$('.screen.on')[0]?.id ?? 'menu-main');
   requestAnimationFrame(frame);
 }
 

@@ -2,15 +2,14 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { importSPKI, type CryptoKey } from 'jose';
 import WebSocket, { WebSocketServer } from 'ws';
-import farmhouse from '../src/maps/farmhouse.json';
+import { mapById } from '../src/maps';
 import { TICK } from '../src/sim/game';
-import type { MapDef } from '../src/sim/map';
 import { Match } from '../src/net/match';
 import type { ClientMsg, ServerMsg } from '../src/net/protocol';
 import type { ControlToGame, GameToControl } from '../src/net/wire';
 import { verifyJoin } from './auth';
 
-const map = farmhouse as MapDef;
+const map = mapById('farmhouse');
 
 export interface GameOptions {
   region?: string;
@@ -96,7 +95,7 @@ export function startGameServer(port: number, o: GameOptions = {}) {
     ws.on('message', (data) => {
       const m = JSON.parse(String(data)) as ControlToGame;
       if (m.t === 'create' && !matches.has(m.matchId)) {
-        matches.set(m.matchId, new Match(m.matchId, map, m.seed, m.players.map((p) => p.username)));
+        matches.set(m.matchId, new Match(m.matchId, mapById(m.map), m.seed, m.players.map((p) => p.username)));
         toControl({ t: 'created', matchId: m.matchId });
       }
     });
@@ -120,7 +119,7 @@ export function startGameServer(port: number, o: GameOptions = {}) {
           reported.add(id);
           const s = m.sim.state;
           toControl({
-            t: 'ended', matchId: id, map: map.id, round: s.round,
+            t: 'ended', matchId: id, map: m.map.id, round: s.round,
             result: s.players.some((p) => p.connected) ? 'over' : 'abandoned',
             stats: Object.fromEntries(s.players.map((p) => [p.id, p.stats])),
           });

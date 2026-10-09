@@ -50,15 +50,7 @@
   <div id="menu-select" class="screen dim-bg">
     <button class="back cond" data-go="main">&lsaquo; Back</button>
     <div class="cond h1">Select map</div>
-    <div class="cards">
-      <button class="card sel" data-go="confirm">
-        <div class="thumb"></div>
-        <div class="card-body">
-          <div class="cond card-title">The Farmhouse</div>
-          <div class="hint">4 zones &middot; 8 windows &middot; 3 doors</div>
-          <div class="cond gold best"></div>
-        </div>
-      </button>
+    <div class="cards" id="map-cards">
       <div class="card empty"><div class="cond">More maps</div><div class="hint">Coming with the map editor</div></div>
     </div>
     <div class="foot hint">[Esc] Back &nbsp;&nbsp; [Enter] Select</div>
@@ -69,8 +61,8 @@
     <div class="panel confirm">
       <div class="thumb"></div>
       <div class="confirm-body">
-        <div class="cond h2">The Farmhouse</div>
-        <div class="hint big">An old farmhouse at night. The power is out. Hold the ground floor, then buy your way up.</div>
+        <div class="cond h2" id="confirm-name"></div>
+        <div class="hint big" id="confirm-blurb"></div>
         <div class="cond label">Mode</div>
         <div class="seg">
           <button class="cond on" data-mode="normal">Normal</button>
@@ -149,6 +141,7 @@
     <div class="panel form">
       <div class="row"><button class="ghost cond" id="lb-copy">Copy invite link</button><span class="hint" id="lb-region"></span></div>
       <table id="lb-members"></table>
+      <div class="seg" id="lb-map"></div>
       <div class="seg" id="lb-mode">
         <button class="cond on" data-lmode="normal">Normal</button>
         <button class="cond" data-lmode="daily">Daily seed</button>

@@ -133,7 +133,7 @@ describe('townhouse map', () => {
     openAll(sim, ['first']);
     p.pos = { x: 5.5, y: 0, z: 19.5 };
     walk(sim, [[3.5, 19.5], [3.5, 12.5]], 6);
-    expect(p.pos.z).toBeGreaterThan(13.6);
+    expect(p.pos.z).toBeGreaterThan(14.6);
   });
 
   it('railings keep players out of the stairwell', () => {

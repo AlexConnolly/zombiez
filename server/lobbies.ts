@@ -7,7 +7,7 @@ const CODE = 'BCDFGHJKLMNPQRSTVWXZ';
 const IDLE_MS = 30 * 60_000;
 
 export interface Member { userId: string; username: string; pings: Pings; ready: boolean }
-export interface Lobby { code: string; members: Member[]; mode: 'normal' | 'daily'; region: string | null; touched: number }
+export interface Lobby { code: string; members: Member[]; mode: 'normal' | 'daily'; map: string; region: string | null; touched: number }
 
 /** Lobby view sent to members: the host is members[0]. */
 export function lobbyView(l: Lobby, regions: string[]): LobbyView {
@@ -16,6 +16,7 @@ export function lobbyView(l: Lobby, regions: string[]): LobbyView {
   return {
     code: l.code,
     mode: l.mode,
+    map: l.map,
     region,
     regionChosen: !!l.region,
     host: l.members[0]?.username,
@@ -35,7 +36,7 @@ export class Lobbies {
     this.leave(m.userId);
     let code = '';
     do code = Array.from({ length: 4 }, () => CODE[randomInt(CODE.length)]).join(''); while (this.byCode.has(code));
-    const l: Lobby = { code, members: [{ ...m, ready: false }], mode: 'normal', region: null, touched: this.now() };
+    const l: Lobby = { code, members: [{ ...m, ready: false }], mode: 'normal', map: 'farmhouse', region: null, touched: this.now() };
     this.byCode.set(code, l);
     this.byUser.set(m.userId, l);
     return l;

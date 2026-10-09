@@ -959,7 +959,8 @@ export class Sim {
         z.pos.z += (dz / d) * st;
         if (!climb) z.yaw = Math.atan2(-dx, -dz);
       }
-      if (z.leg < path.length - 1) { if (st >= d) z.leg++; }
+      // Waypoints count as reached from 0.4 m, so zombies queued on a path, pushed apart by each other, still move on.
+      if (z.leg < path.length - 1) { if (d < 0.4) z.leg++; }
       else if (d < 0.6) z.state = 'tear';
       return;
     }

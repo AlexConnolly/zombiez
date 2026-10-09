@@ -5,6 +5,7 @@ import type { Player } from '../sim/game';
 export interface LobbyView {
   code: string;
   mode: 'normal' | 'daily';
+  map: string;
   region: string | null;
   regionChosen: boolean;
   host: string | undefined;
@@ -21,6 +22,7 @@ export type ControlIn =
   | { t: 'lobby.leave' }
   | { t: 'lobby.ready'; ready: boolean }
   | { t: 'lobby.mode'; mode: 'normal' | 'daily' }
+  | { t: 'lobby.map'; map: string }
   | { t: 'lobby.region'; region: string | null }
   | { t: 'lobby.start' };
 
@@ -36,4 +38,5 @@ export type GameToControl =
   | { t: 'load'; matches: number; players: number }
   | { t: 'ended'; matchId: string; map: string; round: number; result: 'over' | 'abandoned'; stats: Record<string, Player['stats']> };
 
-export type ControlToGame = { t: 'create'; matchId: string; seed: number; mode: 'normal' | 'daily'; players: { userId: string; username: string }[] };
+/** map: a map id; servers from before map choice ignore it and play the Farmhouse. */
+export type ControlToGame = { t: 'create'; matchId: string; seed: number; mode: 'normal' | 'daily'; map?: string; players: { userId: string; username: string }[] };

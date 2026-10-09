@@ -117,6 +117,39 @@ describe('online end to end', () => {
     [a, b].forEach((p) => p.close());
   });
 
+  it('the lobby host picks the map; the game server plays it and reports it at the end', async () => {
+    const [a, b] = await Promise.all([player(), player()]);
+    a.send({ t: 'lobby.create' });
+    await until(() => !!a.last('lobby')?.lobby);
+    expect(a.last('lobby')!.lobby!.map).toBe('farmhouse');
+    b.send({ t: 'lobby.join', code: a.last('lobby')!.lobby!.code });
+    await until(() => a.last('lobby')!.lobby!.members.length === 2);
+    b.send({ t: 'lobby.map', map: 'townhouse' });
+    a.send({ t: 'lobby.map', map: 'nowhere' });
+    await sleep(200);
+    expect(a.last('lobby')!.lobby!.map).toBe('farmhouse');
+    a.send({ t: 'lobby.map', map: 'townhouse' });
+    await until(() => b.last('lobby')!.lobby!.map === 'townhouse');
+    a.send({ t: 'lobby.ready', ready: true });
+    b.send({ t: 'lobby.ready', ready: true });
+    await until(() => a.last('lobby')!.lobby!.members.every((x) => x.ready));
+    a.send({ t: 'lobby.start' });
+    await until(() => !!a.last('match'));
+    const m = a.last('match')!;
+    expect(game.matches.get(m.matchId)!.map.id).toBe('townhouse');
+    const ws = new WebSocket(m.url);
+    const welcome = new Promise<ServerMsg>((r) => ws.on('message', (d) => r(JSON.parse(String(d)))));
+    await new Promise((r) => ws.on('open', r));
+    ws.send(JSON.stringify({ t: 'join', v: PROTOCOL, match: m.matchId, token: m.token }));
+    expect(await welcome).toMatchObject({ t: 'welcome', map: 'townhouse' });
+    game.matches.get(m.matchId)!.sim.state.phase = 'over';
+    await sleep(400);
+    const row = await db.query<{ map: string }>('SELECT map FROM matches WHERE id = $1', [m.matchId]);
+    expect(row.rows[0].map).toBe('townhouse');
+    ws.terminate();
+    [a, b].forEach((p) => p.close());
+  });
+
   it('a game server refuses forged tickets and tickets for another match', async () => {
     const ps = await Promise.all([0, 1, 2, 3].map(() => player()));
     ps.forEach((p) => p.send({ t: 'queue' }));

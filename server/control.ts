@@ -7,6 +7,7 @@ import { openDb, type Db } from './db';
 import { Lobbies, lobbyView, type Lobby } from './lobbies';
 import { matchmake, type Pings, type Ticket } from './matchmaker';
 import type { ControlIn, ControlOut, GameToControl } from '../src/net/wire';
+import { isMapId } from '../src/maps';
 
 const BODY_LIMIT = 10_000;
 const COOKIE = 'zs';
@@ -46,7 +47,7 @@ export async function startControl(port: number, o: ControlOptions) {
     for (const id of extra ?? []) push(id, { t: 'lobby', lobby: null });
   };
 
-  async function startMatch(users: User[], region: string, mode: 'normal' | 'daily'): Promise<string | null> {
+  async function startMatch(users: User[], region: string, mode: 'normal' | 'daily', map = 'farmhouse'): Promise<string | null> {
     const candidates = [...servers].filter((s) => s.region === region).sort((a, b) => a.players - b.players);
     const server = candidates[0];
     if (!server) return 'No game server in that region right now.';
@@ -56,7 +57,7 @@ export async function startControl(port: number, o: ControlOptions) {
       const timer = setTimeout(() => { pendingCreate.delete(id); resolve(false); }, 5000);
       pendingCreate.set(id, () => { clearTimeout(timer); resolve(true); });
     });
-    server.ws.send(JSON.stringify({ t: 'create', matchId: id, seed, mode, players: users.map((u) => ({ userId: u.id, username: u.username })) }));
+    server.ws.send(JSON.stringify({ t: 'create', matchId: id, seed, mode, map, players: users.map((u) => ({ userId: u.id, username: u.username })) }));
     if (!(await created)) return 'The game server did not answer. Try again.';
     live.set(id, { id, server, users, mode, seed, startedAt: new Date(now()) });
     server.players += users.length;
@@ -284,6 +285,9 @@ export async function startControl(port: number, o: ControlOptions) {
         case 'lobby.mode':
           pushLobby(lobbies.update(me.id, (l, _, host) => { if (host) l.mode = m.mode === 'daily' ? 'daily' : 'normal'; }));
           return;
+        case 'lobby.map':
+          pushLobby(lobbies.update(me.id, (l, _, host) => { if (host && isMapId(m.map)) l.map = m.map; }));
+          return;
         case 'lobby.region':
           pushLobby(lobbies.update(me.id, (l, _, host) => { if (host) l.region = regions().includes(String(m.region)) ? String(m.region) : null; }));
           return;
@@ -294,7 +298,7 @@ export async function startControl(port: number, o: ControlOptions) {
           const view = lobbyView(l, regions());
           if (!view.region) return err('No game server is reachable for this lobby.');
           lobbies.close(l);
-          const fail = await startMatch(l.members.map((x) => ({ id: x.userId, username: x.username })), view.region, l.mode);
+          const fail = await startMatch(l.members.map((x) => ({ id: x.userId, username: x.username })), view.region, l.mode, l.map);
           if (fail) l.members.forEach((x) => push(x.userId, { t: 'error', reason: fail }));
           l.members.forEach((x) => push(x.userId, { t: 'lobby', lobby: null }));
           return;

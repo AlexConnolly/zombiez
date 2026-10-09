@@ -1,3 +1,4 @@
+import { MAPS } from '../maps';
 import type { LobbyView } from '../net/wire';
 import { REGION_NAMES, type Account } from './account';
 
@@ -119,6 +120,7 @@ export function initLobbyUi(o: {
     $('#lb-members').innerHTML = lobby.members.map((m) =>
       `<tr><td>${m.username === lobby!.host ? '&#9733; ' : ''}${esc(m.username)}</td><td class="hint">${m.ping ?? '?'} ms</td><td class="${m.ready ? 'ready' : 'hint'}">${m.ready ? 'Ready' : 'Not ready'}</td></tr>`).join('');
     document.querySelectorAll<HTMLButtonElement>('[data-lmode]').forEach((b) => { b.classList.toggle('on', b.dataset.lmode === lobby!.mode); b.disabled = !host; });
+    document.querySelectorAll<HTMLButtonElement>('[data-lmap]').forEach((b) => { b.classList.toggle('on', b.dataset.lmap === (lobby!.map ?? 'farmhouse')); b.disabled = !host; });
     $('#lb-ready').textContent = mine?.ready ? 'Not ready' : 'Ready';
     const start = $<HTMLButtonElement>('#lb-start');
     start.hidden = !host;
@@ -131,6 +133,9 @@ export function initLobbyUi(o: {
   $('#lb-start').addEventListener('click', () => account.send({ t: 'lobby.start' }));
   $('#lb-leave').addEventListener('click', () => { account.send({ t: 'lobby.leave' }); lobby = null; openOnline(); });
   document.querySelectorAll<HTMLButtonElement>('[data-lmode]').forEach((b) => b.addEventListener('click', () => account.send({ t: 'lobby.mode', mode: b.dataset.lmode as 'normal' | 'daily' })));
+  // The host picks the map.
+  $('#lb-map').innerHTML = MAPS.map((m) => `<button class="cond" data-lmap="${m.id}">${esc(m.name)}</button>`).join('');
+  document.querySelectorAll<HTMLButtonElement>('[data-lmap]').forEach((b) => b.addEventListener('click', () => account.send({ t: 'lobby.map', map: b.dataset.lmap! })));
   $('#lb-copy').addEventListener('click', () => void navigator.clipboard?.writeText(`${location.origin}${location.pathname}?join=${lobby?.code}`));
 
   // ---------------------------------------------------------------- profile and leaderboard
