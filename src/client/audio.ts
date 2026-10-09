@@ -1,5 +1,5 @@
 import type { GameEvent, Sim } from '../sim/game';
-import { windowGeom, type V3 } from '../sim/map';
+import { maxBoards, v3, windowGeom, type V3 } from '../sim/map';
 import type { WeaponId } from '../sim/weapons';
 
 type Opt = { at?: V3; gain?: number; delay?: number };
@@ -15,6 +15,10 @@ export class Sound {
   private stepT = 0;
   private beatT = 0;
   private thunderT = 20;
+  private traffic: GainNode | null = null;
+  private sirenT = 30;
+  private foxT = 15;
+  private alarm: { at: V3; t: number; beep: number } | null = null;
   volume = 0.8;
 
   start() {
@@ -216,6 +220,8 @@ export class Sound {
           const w = sim.map.windows.find((x) => x.id === e.window)!;
           const at = windowGeom(sim.map, w).center;
           if (e.torn) { this.hiss(0.25, 'bandpass', 450, { gain: 1.4, at, q: 1.5 }); this.tone(70, 0.15, 'sine', { gain: 0.6, at }); }
+          // A big door: the letterbox rattles before it gives.
+          if (e.torn && maxBoards(w) > 6 && e.boards <= 2) for (let i = 0; i < 6; i++) this.tone(2300 + Math.random() * 400, 0.04, 'square', { gain: 0.15, at, delay: i * 0.06 });
           else { this.tone(120, 0.12, 'sine', { gain: 0.9, at }); this.hiss(0.08, 'lowpass', 800, { gain: 0.5, at }); }
           break;
         }
@@ -276,6 +282,39 @@ export class Sound {
         case 'revive':
           for (const [f, d] of [[523, 0], [784, 0.1]] as const) this.tone(f, 0.5, 'triangle', { gain: 0.2, delay: d });
           break;
+        case 'trap':
+          if (!e.fire) { this.tone(1800, 0.05, 'square', { gain: 0.2 }); this.hiss(1, 'highpass', 2500, { gain: 0.5, attack: 0.1 }); }
+          else { this.hiss(1.8, 'lowpass', 1200, { gain: 1.8, to: 90, attack: 0.02 }); this.tone(50, 1.2, 'sine', { gain: 1.4, to: 28 }); }
+          break;
+        case 'slide':
+          if (e.pid === localId) this.hiss(0.6, 'bandpass', 900, { gain: 0.6, to: 2400, q: 1.5, attack: 0.05 });
+          break;
+        case 'link':
+          // Rope and pulley: a creaking glide.
+          this.tone(180, 1.2, 'sawtooth', { gain: 0.08, to: 120, attack: 0.1 });
+          this.hiss(1.2, 'bandpass', 1200, { gain: 0.3, q: 6, attack: 0.1 });
+          break;
+        case 'secret':
+          if (e.pid === localId) for (let i = 0; i < 3; i++) this.hiss(0.08, 'bandpass', 3500, { gain: 0.35, q: 2, delay: i * 0.09 });
+          break;
+        case 'roof': {
+          // Footsteps on slate, over the 3 s before the zombie reaches the skylight.
+          const z = sim.state.zombies.find((x) => x.id === e.zid);
+          if (!z) break;
+          for (let i = 0; i < 7; i++) {
+            const at = { x: z.pos.x, y: z.pos.y, z: z.pos.z };
+            this.hiss(0.12, 'lowpass', 700, { gain: 1.3, at, delay: i * 0.42 });
+            this.tone(140, 0.08, 'triangle', { gain: 0.5, at, delay: i * 0.42 + 0.02 });
+          }
+          break;
+        }
+        case 'spawn': {
+          // A zombie bumping a parked car sets its alarm off now and then.
+          const z = sim.state.zombies.find((x) => x.id === e.zid);
+          const car = z && sim.map.props?.find((p) => p.kind === 'car' && Math.hypot(p.pos[0] - z.pos.x, p.pos[2] - z.pos.z) < 3.5);
+          if (car && !this.alarm && Math.random() < 0.15) this.alarm = { at: v3(car.pos), t: 8, beep: 0 };
+          break;
+        }
         case 'gameOver':
           this.tone(110, 3, 'sawtooth', { gain: 0.3, to: 40, attack: 0.1 });
           break;
@@ -328,10 +367,58 @@ export class Sound {
         this.hiss(0.07, 'lowpass', 500 + Math.random() * 300, { gain: 0.35 });
       }
     }
-    this.thunderT -= dt;
-    if (this.thunderT <= 0) {
-      this.thunderT = 25 + Math.random() * 40;
-      this.hiss(4, 'lowpass', 300, { gain: 0.9, to: 60, attack: 0.4 });
+    if (sim.map.ambience === 'city') this.city(dt);
+    else {
+      this.thunderT -= dt;
+      if (this.thunderT <= 0) {
+        this.thunderT = 25 + Math.random() * 40;
+        this.hiss(4, 'lowpass', 300, { gain: 0.9, to: 60, attack: 0.4 });
+      }
+    }
+    this.traffic?.gain.setTargetAtTime(sim.map.ambience === 'city' ? 0.07 : 0, now, 1);
+  }
+
+  /** London at night: traffic rumble, a far siren now and then, foxes, and car alarms. */
+  private city(dt: number) {
+    const ctx = this.ctx!;
+    if (!this.traffic) {
+      this.traffic = ctx.createGain();
+      this.traffic.gain.value = 0;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 160;
+      const lfo = ctx.createOscillator();
+      const lg = ctx.createGain();
+      lfo.frequency.value = 0.05;
+      lg.gain.value = 60;
+      lfo.connect(lg).connect(f.frequency);
+      lfo.start();
+      src.connect(f).connect(this.traffic).connect(this.muffle);
+      src.start();
+    }
+    this.sirenT -= dt;
+    if (this.sirenT <= 0) {
+      this.sirenT = 40 + Math.random() * 60;
+      for (let i = 0; i < 4; i++) this.tone(i % 2 ? 950 : 650, 1.1, 'triangle', { gain: 0.035, to: i % 2 ? 650 : 950, attack: 0.3, delay: i * 1.1 });
+    }
+    this.foxT -= dt;
+    if (this.foxT <= 0) {
+      this.foxT = 30 + Math.random() * 50;
+      const at = { x: -15 + Math.random() * 40, y: -3, z: 30 + Math.random() * 10 };
+      for (let i = 0; i < 3; i++) this.tone(1100 + Math.random() * 200, 0.45, 'sawtooth', { gain: 0.3, to: 600, at, delay: i * 0.7, attack: 0.05 });
+    }
+    const a = this.alarm;
+    if (a) {
+      a.t -= dt;
+      a.beep -= dt;
+      if (a.beep <= 0) {
+        a.beep = 0.5;
+        this.tone(Math.round(a.t * 2) % 2 ? 1400 : 1000, 0.3, 'square', { gain: 0.25, at: a.at });
+      }
+      if (a.t <= 0) this.alarm = null;
     }
   }
 }

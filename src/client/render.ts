@@ -166,6 +166,10 @@ export class Renderer {
   private muzzle = new THREE.PointLight(0xffd29a, 0, 6, 2);
   private knife = new THREE.Group();
   private bat = new THREE.Group();
+  private sky = new THREE.HemisphereLight(0x5a6a88, 0x1a120c, 1.1);
+  private moon = new THREE.DirectionalLight(C.moon, 1.2);
+  /** Where the menu camera circles. */
+  private center = new THREE.Vector3(7, 1.5, 8);
   private trapFx = new Map<string, THREE.PointLight>();
   private books: THREE.Mesh[] = [];
   private hatch = new THREE.Group();
@@ -186,8 +190,8 @@ export class Renderer {
     this.scene.fog = new THREE.FogExp2(C.fog, 0.05);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera, this.level, this.blast);
-    this.scene.add(new THREE.HemisphereLight(0x5a6a88, 0x1a120c, 1.1));
-    const moon = new THREE.DirectionalLight(C.moon, 1.2);
+    this.scene.add(this.sky);
+    const moon = this.moon;
     moon.position.set(-30, 40, -20);
     this.scene.add(moon);
     this.camera.add(this.view);
@@ -395,20 +399,59 @@ export class Renderer {
     if (map.ground) this.townscape(map);
     else this.countryside();
     this.makeRain(map);
+    // The city is lit by orange sodium lamps through a thinner haze; the country by the moon.
+    const city = map.ambience === 'city';
+    (this.scene.fog as THREE.FogExp2).color.setHex(city ? 0x2a221c : C.fog);
+    (this.scene.fog as THREE.FogExp2).density = city ? 0.028 : 0.05;
+    (this.scene.background as THREE.Color).setHex(city ? 0x16110d : C.fogDeep);
+    this.sky.color.setHex(city ? 0x8a6a4a : 0x5a6a88);
+    this.sky.intensity = city ? 0.9 : 1.1;
+    this.moon.intensity = city ? 0.5 : 1.2;
+    const fl = map.floors;
+    const w = Math.max(...fl.map((f) => f.tiles[0].length)), d = Math.max(...fl.map((f) => f.tiles.length));
+    this.center.set(w / 2, (fl[0].y + fl[fl.length - 1].y) / 2 + 1.5, d / 2);
 
     // Static boxes: one instanced mesh, colour per kind, slight variation so flat walls read as surfaces.
-    const rb = sim.world.renderBoxes;
-    const inst = new THREE.InstancedMesh(UNIT, new THREE.MeshLambertMaterial(), rb.length);
+    // Waist-high rails are drawn as bars and posts below; everything else is one instanced mesh.
+    const low = (r: (typeof sim.world.renderBoxes)[number]) => r.kind === 'rail' && r.box.max.y - r.box.min.y <= 1.01;
+    const rb = sim.world.renderBoxes.filter((r) => !low(r));
+    const wood = lamC(0x3a2414);
+    for (const { box: b } of sim.world.renderBoxes.filter(low)) {
+      const long = b.max.x - b.min.x > b.max.z - b.min.z;
+      const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
+      this.level.add(boxMesh(long ? 1 : 0.1, 0.08, long ? 0.1 : 1, wood, cx, b.max.y - 0.04, cz));
+      for (const o of [-0.375, -0.125, 0.125, 0.375]) this.level.add(boxMesh(0.04, 0.95, 0.04, wood, cx + (long ? o : 0), b.min.y + 0.475, cz + (long ? 0 : o)));
+    }
+    // Maps with their own wall colours get an outside skin of brick, so the colours only show indoors.
+    const skins: typeof rb = [];
+    map.floors.forEach((f, fi) => {
+      if (!f.wallColor) return;
+      const Y = f.y, H = floorHeight(map, fi);
+      f.tiles.forEach((row, z) => [...row].forEach((t, x) => {
+        if (t !== '#' && t !== 'W') return;
+        for (const [dx, dz] of Object.values(DIRS)) {
+          if ((f.tiles[z + dz]?.[x + dx] ?? ' ') !== ' ') continue;
+          const lo = t === 'W' ? windowOpening(map, map.windows.find((w) => w.floor === f.id && w.cells.some((c) => c[0] === x && c[1] === z))!) : null;
+          const face = (y0: number, y1: number) => skins.push({ kind: 'wall', fi: -1, box: {
+            min: { x: dx > 0 ? x + 1 : dx < 0 ? x - 0.03 : x, y: y0, z: dz > 0 ? z + 1 : dz < 0 ? z - 0.03 : z },
+            max: { x: dx > 0 ? x + 1.03 : dx < 0 ? x : x + 1, y: y1, z: dz > 0 ? z + 1.03 : dz < 0 ? z : z + 1 } } });
+          if (lo) { face(Y - 0.2, Y + lo[0]); face(Y + lo[1], Y + H); } else face(Y - 0.2, Y + H);
+        }
+      }));
+    });
+    const all = [...rb, ...skins];
+    const inst = new THREE.InstancedMesh(UNIT, new THREE.MeshLambertMaterial(), all.length);
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
     const cellar = (fi: number) => map.floors[fi].y < 0;
-    rb.forEach(({ box: b, kind, fi }, i) => {
+    all.forEach(({ box: b, kind, fi }, i) => {
       m.makeScale(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
       m.setPosition((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2);
       inst.setMatrixAt(i, m);
-      const base =
-        kind === 'wall' ? (cellar(fi) ? 0x4b4842 : fi === map.floors.length - 1 ? 0x5d4f40 : C.plaster) :
-        kind === 'floor' ? (cellar(fi) ? 0x3a3834 : 0x4a3424) :
+      const f = map.floors[fi];
+      const base = !f ? 0x5e3b2c :
+        kind === 'wall' ? (f.wallColor ? parseInt(f.wallColor.slice(1), 16) : cellar(fi) ? 0x4b4842 : fi === map.floors.length - 1 ? 0x5d4f40 : C.plaster) :
+        kind === 'floor' ? (f.floorColor ? parseInt(f.floorColor.slice(1), 16) : cellar(fi) ? 0x3a3834 : 0x4a3424) :
         kind === 'stair' ? 0x553c28 : kind === 'rail' ? 0x2a1d14 : 0x2e2822;
       const n = Math.sin(b.min.x * 12.9898 + b.min.z * 78.233 + b.min.y * 3.1) * 43758.5453;
       col.setHex(base).multiplyScalar(0.92 + (n - Math.floor(n)) * 0.16);
@@ -919,8 +962,11 @@ export class Renderer {
     } else {
       // Menu: slow orbit around the house.
       const a = this.time * 0.05;
-      this.camera.position.set(7 + Math.cos(a) * 17, 5.5, 8 + Math.sin(a) * 17);
-      this.camera.lookAt(7, 1.5, 8);
+      const c = this.center;
+      // In a street the neighbours are in the way, so the camera drifts along the pavement opposite instead.
+      if (this.sim.map.ambience === 'city') this.camera.position.set(c.x + Math.sin(a * 2) * 9, 2.5, -14);
+      else this.camera.position.set(c.x + Math.cos(a) * 17, c.y + 4, c.z + Math.sin(a) * 17);
+      this.camera.lookAt(c);
       this.view.visible = false;
     }
     this.renderer.render(this.scene, this.camera);
