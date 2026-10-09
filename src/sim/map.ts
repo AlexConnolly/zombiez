@@ -44,7 +44,8 @@ export interface MapDef {
   }[];
   /** needs: zones that must be open before this door can be bought. */
   doors: { id: string; floor: string; cells: Cell[]; cost: number; opens: string; needs?: string[] }[];
-  stairs: { floor: string; cells: Cell[]; up: Dir }[];
+  /** slide: players at the top can slide down the banister. */
+  stairs: { floor: string; cells: Cell[]; up: Dir; slide?: boolean }[];
   wallBuys: (Placed & { weapon: string; facing: Dir })[];
   boxSpots: (Placed & { zone: string })[];
   perks: (Placed & { perk: string })[];
@@ -57,6 +58,10 @@ export interface MapDef {
   /** Render only: a mansard roof over the top floor, from the eaves up to a flat top at the ridge. */
   roof?: { eaves: number; ridge: number };
   ambience?: 'country' | 'city';
+  /** Bought machines that, after a delay, kill every zombie inside box and hurt players there. */
+  traps?: (Placed & { id: string; cost: number; box: { min: P3; max: P3 }; delay: number; cooldown: number; playerDamage: number })[];
+  /** Paid links between two spots, e.g. a dumbwaiter: using one end refills the ammo of players at the other. */
+  links?: { a: Placed; b: Placed; cost: number }[];
 }
 
 export type WindowDef = MapDef['windows'][number];
@@ -174,6 +179,8 @@ export function validateMap(map: MapDef): string[] {
     ...map.boxSpots.map((p) => ['box spot', p] as [string, Placed]),
     ...map.perks.map((p) => [`perk ${p.perk}`, p] as [string, Placed]),
     ...(map.power ? [['power', map.power] as [string, Placed]] : []),
+    ...(map.traps ?? []).map((t) => [`trap ${t.id}`, t] as [string, Placed]),
+    ...(map.links ?? []).flatMap((l) => [['link', l.a], ['link', l.b]] as [string, Placed][]),
   ];
   for (const [what, p] of placed) {
     checkFloor(p.floor, what);

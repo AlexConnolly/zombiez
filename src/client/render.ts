@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { EYE, type GameEvent, type PowerupKind, type Sim, type Zombie } from '../sim/game';
 import { DIRS, facingDir, floorHeight, floorIndex, maxBoards, placedPos, windowGeom, windowOpening, type MapDef, type V3 } from '../sim/map';
-import { WEAPONS, type WeaponId } from '../sim/weapons';
+import { MELEE, WEAPONS, isMelee, type MeleeId, type WeaponId } from '../sim/weapons';
 
 const C = {
   fog: 0x1b2433, fogDeep: 0x0e131c, moon: 0x8fa6c8, lamp: 0xe89a3c, wood: 0x5a3b26, plaster: 0x6b5843,
@@ -66,6 +66,7 @@ const GUN_PATHS: Record<WeaponId, string> = {
   bucket: 'M14 6h92v24H72l-6 20H52l4-20H14z',
   zapper: 'M20 6h70l20 12-20 12H72l-6 20H54l4-20H20z',
 };
+const MELEE_PATHS: Record<MeleeId, string> = { knife: 'M10 25h60l10-5v10l-10-5', cricketBat: 'M4 20h40l70-6v22l-70-6H4z' };
 
 const GUNS: Record<WeaponId, { len: number; h: number; w: number; color: number; mag?: number; stock?: boolean; scope?: boolean; glow?: boolean }> = {
   p9: { len: 0.22, h: 0.06, w: 0.04, color: 0x2b2d31 },
@@ -164,6 +165,8 @@ export class Renderer {
   private gunId: WeaponId | null = null;
   private muzzle = new THREE.PointLight(0xffd29a, 0, 6, 2);
   private knife = new THREE.Group();
+  private bat = new THREE.Group();
+  private trapFx = new Map<string, THREE.PointLight>();
   private recoil = 0;
   private melee = 0;
   private bob = 0;
@@ -192,6 +195,9 @@ export class Renderer {
     this.knife.add(boxMesh(0.03, 0.02, 0.26, lam(0xb8bcc4), 0, 0, -0.13), boxMesh(0.04, 0.05, 0.1, lam(0x2a1e14), 0, 0, 0.05));
     this.knife.visible = false;
     this.camera.add(this.knife);
+    this.bat.add(boxMesh(0.09, 0.03, 0.55, lam(0xc8a46a), 0, 0, -0.35), boxMesh(0.03, 0.03, 0.25, lam(0x2a1e14), 0, 0, 0.03));
+    this.bat.visible = false;
+    this.camera.add(this.bat);
     for (const k of ['maxAmmo', 'instaKill', 'doublePoints', 'nuke'] as PowerupKind[])
       this.pupMat.set(k, new THREE.MeshBasicMaterial({ map: iconTexture(k), transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false }));
     const moonDisc = new THREE.Mesh(new THREE.CircleGeometry(6, 32), new THREE.MeshBasicMaterial({ color: 0xcfd9e8, fog: false }));
@@ -462,7 +468,7 @@ export class Renderer {
     }
 
     for (const wb of map.wallBuys) {
-      const id = wb.weapon as WeaponId;
+      const id = wb.weapon;
       const p = placedPos(map, wb);
       const [dx, dz] = DIRS[wb.facing];
       const t = tex(256, 160, (g) => {
@@ -471,12 +477,12 @@ export class Renderer {
         g.save();
         g.translate(8, 18);
         g.scale(2, 2);
-        g.stroke(new Path2D(GUN_PATHS[id]));
+        g.stroke(new Path2D(isMelee(id) ? MELEE_PATHS[id] : GUN_PATHS[id as WeaponId]));
         g.restore();
         g.fillStyle = 'rgba(232,226,208,0.9)';
         g.font = '600 30px Oswald, Impact';
         g.textAlign = 'center';
-        g.fillText(String(WEAPONS[id].cost), 128, 150);
+        g.fillText(String(isMelee(id) ? MELEE[id].cost : WEAPONS[id as WeaponId].cost), 128, 150);
       });
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.69), new THREE.MeshLambertMaterial({ map: t, transparent: true }));
       plane.position.set(p.x + dx * 0.49, p.y + 1.45, p.z + dz * 0.49);
@@ -526,6 +532,23 @@ export class Renderer {
       this.lamps.push(light);
       this.level.add(light, boxMesh(0.02, 0.5, 0.02, lam(0x111111), p.x, top - 0.25, p.z), boxMesh(0.1, 0.12, 0.1, new THREE.MeshBasicMaterial({ color: 0xffd9a0 }), p.x, top - 0.55, p.z));
     }
+
+    this.trapFx.clear();
+    for (const t of map.traps ?? []) {
+      const p = placedPos(map, t);
+      // A cast-iron range with four burners.
+      this.level.add(boxMesh(0.9, 0.9, 0.7, lamC(0x1c1d20), p.x, p.y + 0.45, p.z - 0.1));
+      for (const [bx, bz] of [[-0.2, -0.25], [0.2, -0.25], [-0.2, 0.05], [0.2, 0.05]]) this.level.add(boxMesh(0.22, 0.03, 0.22, lamC(0x3a3a3e), p.x + bx, p.y + 0.915, p.z + bz));
+      const light = new THREE.PointLight(0x4a8cff, 0, 14, 1.5);
+      light.position.set(p.x, p.y + 1.3, p.z);
+      this.trapFx.set(t.id, light);
+      this.level.add(light);
+    }
+    for (const l of map.links ?? [])
+      for (const end of [l.a, l.b]) {
+        const p = placedPos(map, end);
+        this.level.add(boxMesh(0.9, 0.9, 0.9, lamC(0x2a1e14), p.x + 0.1, p.y + 1.25, p.z), boxMesh(0.7, 0.6, 0.02, basic(0x0a0a0a), p.x - 0.36, p.y + 1.25, p.z).rotateY(Math.PI / 2));
+      }
 
     // Mystery box: crate with a gold glow, lid that opens, and a weapon that floats out.
     this.box = new THREE.Group();
@@ -705,6 +728,22 @@ export class Renderer {
         case 'melee':
           if (e.pid === localId) this.melee = 0.3;
           break;
+        case 'trap': {
+          const t = this.sim.map.traps?.find((x) => x.id === e.id);
+          const light = this.trapFx.get(e.id);
+          if (!t || !light) break;
+          if (!e.fire) { light.color.setHex(0x4a8cff); light.intensity = 6; break; }
+          // The gas goes up: fire through the whole trap box.
+          light.color.setHex(0xff7a20);
+          light.intensity = 60;
+          const [ax, ay, az] = t.box.min, [bx, , bz] = t.box.max;
+          for (let i = 0; i < 40; i++) {
+            const at = { x: ax + Math.random() * (bx - ax), y: ay + 0.8 + Math.random() * 1.5, z: az + Math.random() * (bz - az) };
+            this.flash(at, 0xff7a20, 1.2 + Math.random(), 0.6);
+          }
+          this.shake = Math.max(this.shake, 0.6);
+          break;
+        }
         case 'power':
           this.lever.rotation.set(this.lever.rotation.x ? -0.6 : 0, 0, this.lever.rotation.z ? -0.6 : 0);
           break;
@@ -735,6 +774,11 @@ export class Renderer {
     for (const w of this.sim.map.windows) this.boards.get(w.id)!.forEach((b, i) => (b.visible = i < s.windows[w.id].boards));
     for (const [id, g] of this.debris) g.visible = !s.doors[id];
     for (const p of this.perkPanels) p.emissiveIntensity = s.power ? 0.9 : 0;
+    for (const [id, l] of this.trapFx) {
+      const ts = s.traps[id];
+      if (ts?.fuse > 0) l.intensity = 6 + Math.random() * 3;
+      else l.intensity = Math.max(0, l.intensity - dt * 40);
+    }
     this.lamps.forEach((l, i) => (l.intensity = i === 1 ? 9 * (0.75 + 0.25 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3)) : 9));
 
     // Zombies.
@@ -843,7 +887,7 @@ export class Renderer {
       const sh = this.reduceShake ? 0 : this.shake * this.shake;
       this.camera.position.set(lerp(p.x, me.pos.x) + (Math.random() - 0.5) * sh * 0.2, lerp(p.y, me.pos.y) + ((me.status !== 'alive') ? 0.35 : EYE) + bobY + (Math.random() - 0.5) * sh * 0.2, lerp(p.z, me.pos.z));
       this.camera.rotation.set(local.pitch + this.recoil * 0.035, local.yaw, me.status === 'down' ? 0.4 : 0);
-      this.updateView(me.weapons[me.cur].id, me.reloadT > 0, dt);
+      this.updateView(me.weapons[me.cur].id, me.melee, me.reloadT > 0, dt);
       this.view.visible = !local.spectate && (me.status === 'alive' || me.status === 'down');
     } else {
       // Menu: slow orbit around the house.
@@ -936,7 +980,7 @@ export class Renderer {
     return g;
   }
 
-  private updateView(id: WeaponId, reloading: boolean, dt: number) {
+  private updateView(id: WeaponId, melee: MeleeId, reloading: boolean, dt: number) {
     if (this.gunId !== id) {
       if (this.gunId) this.view.remove(this.gun(this.gunId));
       this.view.add(this.gun(id));
@@ -948,10 +992,12 @@ export class Renderer {
     this.muzzle.position.copy(g.userData.tip as THREE.Vector3);
     this.muzzle.intensity = Math.max(0, this.muzzle.intensity - dt * 120);
     this.melee = Math.max(0, this.melee - dt);
-    this.knife.visible = this.melee > 0;
+    const blade = melee === 'cricketBat' ? this.bat : this.knife;
+    this.knife.visible = this.bat.visible = false;
+    blade.visible = this.melee > 0;
     g.visible = this.melee <= 0;
     const k = 1 - this.melee / 0.3;
-    this.knife.position.set(0.3 - k * 0.5, -0.2, -0.45);
-    this.knife.rotation.set(0, 0.8 - k * 1.6, -0.3);
+    blade.position.set(0.3 - k * 0.5, -0.2, -0.45);
+    blade.rotation.set(0, 0.8 - k * 1.6, -0.3);
   }
 }

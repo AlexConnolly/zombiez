@@ -158,7 +158,7 @@ export class NetClient {
     this.shots = this.shots.filter((s) => s > this.ack);
     const before = this.body && { ...this.body.pos };
     this.body = { pos: { ...me.pos }, vy: me.vy, onGround: me.onGround, yaw: me.yaw, pitch: me.pitch };
-    if (me.status === 'alive' || me.status === 'down')
+    if (!me.slide && (me.status === 'alive' || me.status === 'down'))
       for (const p of this.pending) movePlayer(this.body, p.cmd, this.sim.world, me.status === 'down');
     if (!before) return;
     const dx = before.x - this.body.pos.x, dy = before.y - this.body.pos.y, dz = before.z - this.body.pos.z;
@@ -178,7 +178,7 @@ export class NetClient {
     this.lastCmd = c;
     const me = this.me();
     if (!me || !this.body || (me.status !== 'alive' && me.status !== 'down') || !me.connected) return;
-    movePlayer(this.body, c, this.sim.world, me.status === 'down');
+    if (!me.slide) movePlayer(this.body, c, this.sim.world, me.status === 'down');
     this.predictFire(c);
   }
 

@@ -40,6 +40,8 @@ export interface Snap {
   powerups: [number, number, number, number, number, number][];
   /** id, weapon, x, y, z */
   projectiles: [number, WeaponId, number, number, number][];
+  /** Map machines (missing from older servers). */
+  traps?: Game['traps'];
   events: GameEvent[];
 }
 
@@ -69,6 +71,7 @@ export function encodeSnap(s: Game, map: MapDef, ack: number, events: GameEvent[
     doublePoints: s.doublePoints,
     powerups: s.powerups.map((p) => [p.id, POWERUPS.indexOf(p.kind), r2(p.pos.x), r2(p.pos.y), r2(p.pos.z), r2(p.t)]),
     projectiles: s.projectiles.map((p) => [p.id, p.weapon, r2(p.pos.x), r2(p.pos.y), r2(p.pos.z)]),
+    traps: s.traps,
     events,
   };
 }
@@ -95,5 +98,6 @@ export function applySnap(s: Game, map: MapDef, n: Snap) {
   s.instaKill = n.instaKill;
   s.doublePoints = n.doublePoints;
   s.powerups = n.powerups.map(([id, k, x, y, z, t]) => ({ id, kind: POWERUPS[k], pos: { x, y, z }, t }));
+  if (n.traps) s.traps = n.traps;
   s.projectiles = n.projectiles.map(([id, weapon, x, y, z]) => ({ id, pid: '', weapon, pos: { x, y, z }, vel: { x: 0, y: 0, z: 0 }, t: 0 }));
 }

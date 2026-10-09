@@ -34,4 +34,10 @@ export const PERKS = {
 } as const;
 export type PerkId = keyof typeof PERKS;
 
-export const KNIFE = { damage: 150, range: 1.7, cooldown: 0.7 };
+/** Melee weapons. cone: the cosine of the widest angle off your aim that still hits. */
+export const MELEE = {
+  knife: { name: 'Knife', damage: 150, range: 1.7, cooldown: 0.7, cone: 0.4, cost: 0 },
+  cricketBat: { name: 'Cricket Bat', damage: 450, range: 2.1, cooldown: 0.8, cone: 0, cost: 1500 },
+};
+export type MeleeId = keyof typeof MELEE;
+export const isMelee = (id: string): id is MeleeId => id in MELEE;

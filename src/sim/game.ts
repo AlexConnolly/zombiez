@@ -1,7 +1,7 @@
-import { DIRS, cellCenter, facingDir, floorIndex, maxBoards, placedPos, v3, windowGeom, type MapDef, type V3 } from './map';
-import { dist2, moveBody, rayBox, rayWorld, box, type Box } from './physics';
+import { DIRS, cellCenter, facingDir, floorIndex, maxBoards, placedPos, stairExits, v3, windowGeom, type MapDef, type V3 } from './map';
+import { dist2, moveBody, pointInBox, rayBox, rayWorld, box, type Box } from './physics';
 import { next } from './rng';
-import { KNIFE, PERKS, WEAPONS, type PerkId, type WeaponId } from './weapons';
+import { MELEE, PERKS, WEAPONS, isMelee, type MeleeId, type PerkId, type WeaponId } from './weapons';
 import { World } from './world';
 
 export const TICK = 1 / 30;
@@ -27,6 +27,8 @@ const ZOMBIE_DAMAGE = 50;
 const CLIMB_SPEED = 1;
 /** Footsteps on the roof are heard this long before a zombie reaches a skylight. */
 const ROOF_WARNING = 3;
+const SLIDE_TIME = 0.6;
+const LINK_RANGE = 2.5;
 /** Lag compensation looks back at most this many ticks (~350 ms: 250 ms ping + 100 ms interpolation). */
 export const MAX_REWIND = 11;
 const BLEED_TIME = 30;
@@ -82,7 +84,10 @@ export type GameEvent =
   | { type: 'explode'; pos: V3; radius: number }
   | { type: 'boxRoll'; pid: string }
   | { type: 'boxOffer'; weapon: WeaponId }
-  | { type: 'boxMove'; spot: number };
+  | { type: 'boxMove'; spot: number }
+  | { type: 'trap'; id: string; fire: boolean }
+  | { type: 'slide'; pid: string }
+  | { type: 'link'; pid: string; to: number };
 
 export interface Player {
   id: string;
@@ -100,6 +105,9 @@ export interface Player {
   fireCD: number;
   meleeCD: number;
   perks: PerkId[];
+  melee: MeleeId;
+  /** Sliding down a banister: seconds left, and the start and end of the slide. */
+  slide: { t: number; from: V3; to: V3 } | null;
   /** alive: playing. down: last stand, can be revived. dead: bled out, respawns next round. away: grace ran out, respawns next round if back. left: gone. */
   status: 'alive' | 'down' | 'dead' | 'away' | 'left';
   connected: boolean;
@@ -157,6 +165,8 @@ export interface Game {
   doublePoints: number;
   projectiles: { id: number; pid: string; weapon: WeaponId; pos: V3; vel: V3; t: number }[];
   nextId: number;
+  /** Per trap: seconds until it can be used again, and seconds until a lit one fires (0 = not lit). */
+  traps: Record<string, { cd: number; fuse: number }>;
 }
 
 export type Interaction =
@@ -167,6 +177,10 @@ export type Interaction =
   | { kind: 'box'; label: string; cost: number }
   | { kind: 'perk'; perk: PerkId; label: string; cost: number }
   | { kind: 'power'; label: string }
+  | { kind: 'trap'; id: string; label: string; cost: number }
+  | { kind: 'slide'; stair: number; label: string }
+  | { kind: 'link'; link: number; label: string; cost: number }
+  | { kind: 'melee'; melee: MeleeId; label: string; cost: number }
   | { kind: 'info'; label: string };
 
 const v = (x: number, y: number, z: number): V3 => ({ x, y, z });
@@ -204,6 +218,7 @@ export class Sim {
       doublePoints: 0,
       projectiles: [],
       nextId: 1,
+      traps: Object.fromEntries((map.traps ?? []).map((t) => [t.id, { cd: 0, fuse: 0 }])),
     };
     this.state = s;
     s.box.moveAt = 4 + Math.floor(this.rand() * 5);
@@ -216,7 +231,7 @@ export class Sim {
   /** Movement only, for inputs that arrive late and are caught up in one server tick. */
   extraMove(id: string, c: Command) {
     const p = this.player(id);
-    if (p && p.connected && (p.status === 'alive' || p.status === 'down')) movePlayer(p, c, this.world, p.status === 'down');
+    if (p && p.connected && !p.slide && (p.status === 'alive' || p.status === 'down')) movePlayer(p, c, this.world, p.status === 'down');
   }
 
   /** Adds a player mid-match (dev matches and tests; lobby matches start with everyone). */
@@ -244,6 +259,7 @@ export class Sim {
       this.updateProjectiles();
       this.updatePowerups();
       this.updateBox();
+      this.updateTraps();
       s.instaKill = Math.max(0, s.instaKill - TICK);
       s.doublePoints = Math.max(0, s.doublePoints - TICK);
     }
@@ -259,7 +275,16 @@ export class Sim {
   private updatePlayer(p: Player, c: Command) {
     if (!p.connected || (p.status !== 'alive' && p.status !== 'down')) return;
     const down = p.status === 'down';
-    movePlayer(p, c, this.world, down);
+    if (p.slide) {
+      const sl = p.slide;
+      sl.t = Math.max(0, sl.t - TICK);
+      const k = 1 - sl.t / SLIDE_TIME;
+      p.pos = v(sl.from.x + (sl.to.x - sl.from.x) * k, sl.from.y + (sl.to.y - sl.from.y) * k, sl.from.z + (sl.to.z - sl.from.z) * k);
+      p.vy = 0;
+      p.yaw = c.yaw;
+      p.pitch = c.pitch;
+      if (sl.t <= 0) p.slide = null;
+    } else movePlayer(p, c, this.world, down);
     if (down) {
       p.bleedT -= TICK;
       if (p.bleedT <= 0) {
@@ -295,7 +320,7 @@ export class Sim {
     } else if (edge('reload')) this.startReload(p);
     if (edge('melee') && p.meleeCD <= 0) this.melee(p);
     const trigger = def.auto ? c.fire : edge('fire');
-    if (trigger && p.fireCD <= 0 && p.reloadT <= 0 && p.meleeCD < KNIFE.cooldown - 0.3) {
+    if (trigger && p.fireCD <= 0 && p.reloadT <= 0 && p.meleeCD < MELEE[p.melee].cooldown - 0.3) {
       const cw = p.weapons[p.cur];
       if (cw.mag > 0) this.fire(p, c.view);
       else if (edge('fire')) {
@@ -406,20 +431,21 @@ export class Sim {
   }
 
   private melee(p: Player) {
-    p.meleeCD = KNIFE.cooldown;
+    const m = MELEE[p.melee];
+    p.meleeCD = m.cooldown;
     const d = this.aim(p);
     let best: Zombie | null = null;
-    let bd = KNIFE.range ** 2;
+    let bd = m.range ** 2;
     for (const z of this.state.zombies) {
       const dx = z.pos.x - p.pos.x, dz = z.pos.z - p.pos.z;
       const d2 = dx * dx + dz * dz;
       if (d2 > bd || Math.abs(z.pos.y - p.pos.y) > 1.5) continue;
       const l = Math.sqrt(d2) || 1;
-      if ((dx * d.x + dz * d.z) / l < 0.4) continue;
+      if ((dx * d.x + dz * d.z) / l < m.cone) continue;
       best = z;
       bd = d2;
     }
-    if (best) this.hurtZombie(best, KNIFE.damage, p, 'knife');
+    if (best) this.hurtZombie(best, m.damage, p, 'knife');
     this.events.push({ type: 'melee', pid: p.id, hit: !!best });
   }
 
@@ -553,9 +579,10 @@ export class Sim {
     if (p.status === 'dead') {
       p.weapons = [{ id: 'p9', mag: WEAPONS.p9.mag, reserve: WEAPONS.p9.reserve }];
       p.cur = 0;
+      p.melee = 'knife';
       p.points = Math.max(p.points, 500);
     }
-    Object.assign(p, { pos: placedPos(this.map, sp), vy: 0, onGround: true, hp: 100, maxHp: 100, perks: [], status: 'alive', reloadT: 0, bleedT: 0, hurtT: 99 });
+    Object.assign(p, { pos: placedPos(this.map, sp), slide: null, vy: 0, onGround: true, hp: 100, maxHp: 100, perks: [], status: 'alive', reloadT: 0, bleedT: 0, hurtT: 99 });
     this.events.push({ type: 'respawn', pid: p.id });
   }
 
@@ -589,6 +616,10 @@ export class Sim {
       for (const [x, z] of d.cells) add(cellCenter(map, fi, x, z), ready ? { kind: 'door', id: d.id, label: 'Clear debris', cost: d.cost } : { kind: 'info', label: 'Blocked from the other side' });
     }
     for (const wb of map.wallBuys) {
+      if (isMelee(wb.weapon)) {
+        if (p.melee !== wb.weapon) add(placedPos(map, wb), { kind: 'melee', melee: wb.weapon, label: `Buy ${MELEE[wb.weapon].name}`, cost: MELEE[wb.weapon].cost });
+        continue;
+      }
       const id = wb.weapon as WeaponId;
       const def = WEAPONS[id];
       const has = p.weapons.some((w) => w.id === id);
@@ -604,6 +635,19 @@ export class Sim {
       add(placedPos(map, pk), s.power ? { kind: 'perk', perk: id, label: `Drink ${PERKS[id].name}`, cost: PERKS[id].cost } : { kind: 'info', label: 'Needs power' });
     }
     if (map.power && !s.power) add(placedPos(map, map.power), { kind: 'power', label: 'Turn on power' });
+    for (const t of map.traps ?? []) {
+      const ts = s.traps[t.id];
+      add(placedPos(map, t), ts.cd > 0 ? { kind: 'info', label: `Cooling down ${Math.ceil(ts.cd)}s` } : { kind: 'trap', id: t.id, label: 'Light the gas', cost: t.cost });
+    }
+    (map.links ?? []).forEach((l, i) => {
+      add(placedPos(map, l.a), { kind: 'link', link: i, label: 'Send ammo up the dumbwaiter', cost: l.cost });
+      add(placedPos(map, l.b), { kind: 'link', link: i, label: 'Send ammo down the dumbwaiter', cost: l.cost });
+    });
+    map.stairs.forEach((st, i) => {
+      if (!st.slide) return;
+      const fi = floorIndex(map, st.floor) + 1;
+      for (const [x, z] of stairExits(map, st)) if (!this.doorAt(fi, x, z)) add(cellCenter(map, fi, x, z), { kind: 'slide', stair: i, label: 'Slide down the banister' }, 1.2);
+    });
     opts.sort((a, b) => a[0] - b[0]);
     return opts[0]?.[1] ?? null;
   }
@@ -657,6 +701,69 @@ export class Sim {
         s.power = true;
         this.events.push({ type: 'power' });
         return;
+      case 'melee':
+        if (!this.pay(p, it.cost)) return;
+        p.melee = it.melee;
+        this.events.push({ type: 'buy', pid: p.id, what: it.melee });
+        return;
+      case 'trap': {
+        if (!this.pay(p, it.cost)) return;
+        const t = this.map.traps!.find((x) => x.id === it.id)!;
+        s.traps[it.id] = { cd: t.cooldown, fuse: t.delay };
+        this.events.push({ type: 'trap', id: it.id, fire: false });
+        return;
+      }
+      case 'link': {
+        const l = this.map.links![it.link];
+        const a = placedPos(this.map, l.a);
+        const far = dist2(a, p.pos) <= USE_RANGE ** 2 && Math.abs(a.y - p.pos.y) < 1.2 ? placedPos(this.map, l.b) : a;
+        const to = s.players.filter((o) => o !== p && o.status === 'alive' && dist2(o.pos, far) <= LINK_RANGE ** 2 && Math.abs(o.pos.y - far.y) < 1.2);
+        // Nobody at the other end to catch it: no charge.
+        if (!to.length) return void this.events.push({ type: 'denied', pid: p.id });
+        if (!this.pay(p, it.cost)) return;
+        for (const o of to) for (const w of o.weapons) w.reserve = WEAPONS[w.id].reserve;
+        this.events.push({ type: 'link', pid: p.id, to: it.link });
+        return;
+      }
+      case 'slide': {
+        const st = this.map.stairs[it.stair];
+        const fi = floorIndex(this.map, st.floor);
+        const [dx, dz] = DIRS[st.up];
+        const prog = (c: [number, number]) => c[0] * dx + c[1] * dz;
+        const lo = Math.min(...st.cells.map(prog));
+        // Land on the bottom step in the lane nearest the player.
+        const bottom = st.cells.filter((c) => prog(c) === lo).map(([x, z]) => cellCenter(this.map, fi, x, z));
+        const lane = (q: V3) => (dx ? q.z - p.pos.z : q.x - p.pos.x) ** 2;
+        const to = bottom.sort((a, b) => lane(a) - lane(b))[0];
+        p.slide = { t: SLIDE_TIME, from: copy(p.pos), to: v(to.x, to.y + 0.3, to.z) };
+        p.reloadT = 0;
+        this.events.push({ type: 'slide', pid: p.id });
+        return;
+      }
+    }
+  }
+
+  private doorAt(fi: number, x: number, z: number) {
+    return this.map.doors.some((d) => !this.state.doors[d.id] && floorIndex(this.map, d.floor) === fi && d.cells.some((c) => c[0] === x && c[1] === z));
+  }
+
+  private updateTraps() {
+    const s = this.state;
+    for (const t of this.map.traps ?? []) {
+      const ts = s.traps[t.id];
+      ts.cd = Math.max(0, ts.cd - TICK);
+      if (ts.fuse <= 0) continue;
+      ts.fuse -= TICK;
+      if (ts.fuse > 1e-9) continue;
+      ts.fuse = 0;
+      this.events.push({ type: 'trap', id: t.id, fire: true });
+      const b = { min: v3(t.box.min), max: v3(t.box.max) };
+      for (const z of [...s.zombies]) {
+        if (!pointInBox(v(z.pos.x, z.pos.y + 0.5, z.pos.z), b)) continue;
+        this.removeZombie(z);
+        this.events.push({ type: 'kill', zid: z.id, pos: copy(z.pos), head: false, pid: '' });
+      }
+      for (const p of s.players) if (p.status === 'alive' && pointInBox(v(p.pos.x, p.pos.y + 0.5, p.pos.z), b)) this.hurtPlayer(p, t.playerDamage);
     }
   }
 
@@ -1011,6 +1118,8 @@ function newPlayer(id: string): Player {
     fireCD: 0,
     meleeCD: 0,
     perks: [],
+    melee: 'knife',
+    slide: null,
     status: 'alive',
     connected: true,
     graceT: 0,
