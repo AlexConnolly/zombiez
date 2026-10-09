@@ -4,7 +4,15 @@ export type Cell = [number, number];
 
 export const DIRS: Record<Dir, Cell> = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
 
-export interface FloorDef { id: string; y: number; tiles: string[] }
+export interface FloorDef {
+  id: string;
+  y: number;
+  tiles: string[];
+  /** Wall height on this floor; defaults to the map's wallHeight. */
+  height?: number;
+  wallColor?: string;
+  floorColor?: string;
+}
 export interface Placed { floor: string; cell: Cell }
 
 export interface MapDef {
@@ -16,8 +24,19 @@ export interface MapDef {
   startZone: string;
   floors: FloorDef[];
   playerSpawns: Placed[];
-  windows: { id: string; floor: string; cells: Cell[]; facing: Dir; zone: string }[];
-  doors: { id: string; floor: string; cells: Cell[]; cost: number; opens: string }[];
+  windows: {
+    id: string;
+    floor: string;
+    cells: Cell[];
+    facing: Dir;
+    zone: string;
+    /** Barricade size; defaults to 6. */
+    boards?: number;
+    /** Opening height above the floor, [bottom, top]. */
+    opening?: [number, number];
+  }[];
+  /** needs: zones that must be open before this door can be bought. */
+  doors: { id: string; floor: string; cells: Cell[]; cost: number; opens: string; needs?: string[] }[];
   stairs: { floor: string; cells: Cell[]; up: Dir }[];
   wallBuys: (Placed & { weapon: string; facing: Dir })[];
   boxSpots: (Placed & { zone: string })[];
@@ -34,6 +53,8 @@ export function tile(map: MapDef, fi: number, x: number, z: number): string {
   return map.floors[fi]?.tiles[z]?.[x] ?? ' ';
 }
 
+export const floorHeight = (map: MapDef, fi: number) => map.floors[fi].height ?? map.wallHeight;
+
 export function cellCenter(map: MapDef, fi: number, x: number, z: number): V3 {
   const s = map.cellSize;
   return { x: (x + 0.5) * s, y: map.floors[fi].y, z: (z + 0.5) * s };
@@ -45,6 +66,7 @@ export function placedPos(map: MapDef, p: Placed): V3 {
 
 /** Opening height above the floor: cellar windows sit at the top of the wall, at ground level outside. */
 export function windowOpening(map: MapDef, w: WindowDef): [number, number] {
+  if (w.opening) return w.opening;
   return map.floors[floorIndex(map, w.floor)].y < 0 ? [2.0, 2.8] : [0.9, 2.3];
 }
 
@@ -64,6 +86,8 @@ export function windowGeom(map: MapDef, w: WindowDef) {
 }
 
 const WALKABLE = new Set(['.', 'D', 'S']);
+/** Tiles that leave a hole for the stairs below. 'R' is a hole edged with a railing. */
+const HOLE = new Set([' ', 'R']);
 export const isWalkTile = (t: string) => WALKABLE.has(t);
 
 /** Returns a list of problems. Empty list = valid map. */
@@ -88,8 +112,12 @@ export function validateMap(map: MapDef): string[] {
       if (at(w.floor, [c[0] + dx, c[1] + dz]) !== ' ') errs.push(`window ${w.id}: outside of ${c} is not open`);
     }
   }
+  map.floors.forEach((f, fi) =>
+    f.tiles.forEach((r, z) => [...r].forEach((t, x) => t === 'R' && tile(map, fi - 1, x, z) !== 'S' && errs.push(`floor ${f.id}: railing ${[x, z]} is not over stairs`))),
+  );
   for (const d of map.doors) {
     checkFloor(d.floor, `door ${d.id}`);
+    for (const n of d.needs ?? []) if (!zones.has(n)) errs.push(`door ${d.id}: needs zone ${n} that is never opened`);
     for (const c of d.cells) if (at(d.floor, c) !== 'D') errs.push(`door ${d.id}: cell ${c} is not a D tile`);
   }
   for (const s of map.stairs) {
@@ -98,7 +126,7 @@ export function validateMap(map: MapDef): string[] {
     const above = map.floors[fi + 1].id;
     for (const c of s.cells) {
       if (at(s.floor, c) !== 'S') errs.push(`stairs on ${s.floor}: cell ${c} is not an S tile`);
-      if (at(above, c) !== ' ') errs.push(`stairs on ${s.floor}: cell ${c} is not open on ${above}`);
+      if (!HOLE.has(at(above, c))) errs.push(`stairs on ${s.floor}: cell ${c} is not open on ${above}`);
     }
     for (const c of stairExits(map, s)) if (!isWalkTile(at(above, c))) errs.push(`stairs on ${s.floor}: exit ${c} on ${above} is not walkable`);
   }

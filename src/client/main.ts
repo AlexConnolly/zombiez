@@ -1,6 +1,5 @@
-import farmhouse from '../maps/farmhouse.json';
+import { mapById } from '../maps';
 import { NO_INPUT, Sim, TICK, type Command, type GameEvent } from '../sim/game';
-import type { MapDef } from '../sim/map';
 import { WEAPONS } from '../sim/weapons';
 import { NetClient } from '../net/client';
 import type { ServerMsg } from '../net/protocol';
@@ -9,7 +8,7 @@ import { Sound } from './audio';
 import { initLobbyUi } from './lobby-ui';
 import { Renderer, type Snap } from './render';
 
-const map = farmhouse as MapDef;
+let map = mapById(new URLSearchParams(location.search).get('map'));
 /** The local player's id: 'p1' in solo, your name online. */
 let localId = 'p1';
 const DEBUG = new URLSearchParams(location.search).has('debug');

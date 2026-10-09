@@ -580,7 +580,8 @@ export class Sim {
     for (const d of map.doors) {
       if (s.doors[d.id]) continue;
       const fi = floorIndex(map, d.floor);
-      for (const [x, z] of d.cells) add(cellCenter(map, fi, x, z), { kind: 'door', id: d.id, label: 'Clear debris', cost: d.cost });
+      const ready = (d.needs ?? []).every((z) => s.zones[z]);
+      for (const [x, z] of d.cells) add(cellCenter(map, fi, x, z), ready ? { kind: 'door', id: d.id, label: 'Clear debris', cost: d.cost } : { kind: 'info', label: 'Blocked from the other side' });
     }
     for (const wb of map.wallBuys) {
       const id = wb.weapon as WeaponId;

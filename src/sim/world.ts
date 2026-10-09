@@ -1,4 +1,4 @@
-import { DIRS, cellCenter, floorIndex, stairExits, tile, windowOpening, type Cell, type MapDef, type V3 } from './map';
+import { DIRS, cellCenter, floorHeight, floorIndex, isWalkTile, stairExits, tile, windowOpening, type Cell, type Dir, type MapDef, type V3 } from './map';
 import { SolidIndex, box, type Box } from './physics';
 
 const SLAB = 0.2;
@@ -14,8 +14,9 @@ export class World {
   readonly nodeCount: number;
   readonly stairBoxes: Box[] = [];
   /** Visible static geometry, tagged for the renderer. */
-  readonly renderBoxes: { box: Box; kind: 'wall' | 'floor' | 'roof' | 'stair'; fi: number }[] = [];
-  private stairCell = new Map<number, { fi: number; bottom: Set<number> }>();
+  readonly renderBoxes: { box: Box; kind: 'wall' | 'floor' | 'roof' | 'stair' | 'rail'; fi: number }[] = [];
+  /** For each stair cell: the cells it may be entered from (below the bottom step, and beside it). */
+  private stairCell = new Map<number, { fi: number; bottom: Set<number>; up: Dir }>();
   private blocked = new Set<number>();
 
   constructor(readonly map: MapDef) {
@@ -29,7 +30,6 @@ export class World {
     const body: Box[] = [];
     const ray: Box[] = [];
     const both = (b: Box) => (body.push(b), ray.push(b));
-    const H = map.wallHeight;
 
     for (const s of map.stairs) {
       const fi = floorIndex(map, s.floor);
@@ -40,12 +40,19 @@ export class World {
       const Y = map.floors[fi].y;
       const rise = map.floors[fi + 1].y - Y;
       const per = Math.ceil(rise / 0.25 / len);
-      const total = per * len;
-      const bottom = new Set(s.cells.filter((c) => prog(c) === lo).map(([x, z]) => this.node(fi, x - dx, z - dz)));
+      // The bottom cell is one flat step, so it can be stepped onto from the side as well as from below.
+      const steps = per * len - per + 1;
+      const bottom = new Set<number>();
       for (const c of s.cells) {
-        this.stairCell.set(this.node(fi, c[0], c[1]), { fi, bottom });
+        if (prog(c) !== lo) continue;
+        bottom.add(this.node(fi, c[0] - dx, c[1] - dz));
+        for (const [sx, sz] of [[dz, dx], [-dz, -dx]]) if (!s.cells.some((o) => o[0] === c[0] + sx && o[1] === c[1] + sz)) bottom.add(this.node(fi, c[0] + sx, c[1] + sz));
+      }
+      for (const c of s.cells) {
+        this.stairCell.set(this.node(fi, c[0], c[1]), { fi, bottom: prog(c) === lo ? bottom : new Set(), up: s.up });
         for (let j = 0; j < per; j++) {
-          const top = Y + (rise * ((prog(c) - lo) * per + j + 1)) / total;
+          const k = Math.max(0, (prog(c) - lo) * per + j - (per - 1));
+          const top = Y + (rise * (k + 1)) / steps;
           // Sub-step j covers the slice [j/per, (j+1)/per] of the cell, counted from its low side.
           const a = j / per;
           const b = (j + 1) / per;
@@ -62,8 +69,36 @@ export class World {
       }
     }
 
+    // Railings: each 'R' hole gets a rail on every side that faces floor, except where its stairs come out.
+    const exits = new Set<number>();
+    for (const s of map.stairs) for (const [x, z] of stairExits(map, s)) exits.add(this.node(floorIndex(map, s.floor) + 1, x, z));
+    map.floors.forEach((f, fi) =>
+      f.tiles.forEach((row, z) =>
+        [...row].forEach((t, x) => {
+          if (t !== 'R') return;
+          const Y = f.y;
+          for (const d of ['n', 's', 'e', 'w'] as Dir[]) {
+            const [dx, dz] = DIRS[d];
+            const nt = tile(map, fi, x + dx, z + dz);
+            const n = this.node(fi, x + dx, z + dz);
+            if (!isWalkTile(nt) || exits.has(n)) continue;
+            const st = this.stairCell.get(n);
+            if (st && (DIRS[st.up][0] === 0) === (dx === 0)) continue;
+            // Beside a flight on this floor the rail is a full-height banister; elsewhere waist high. It sits just inside the neighbour cell.
+            const h = st ? floorHeight(map, fi) : 1;
+            const T = 0.08;
+            const cx = x + 0.5 + dx * 0.5, cz = z + 0.5 + dz * 0.5;
+            const bx = dx ? box(cx + (dx > 0 ? 0 : -T), Y, z, cx + (dx > 0 ? T : 0), Y + h, z + 1) : box(x, Y, cz + (dz > 0 ? 0 : -T), x + 1, Y + h, cz + (dz > 0 ? T : 0));
+            body.push(bx);
+            this.renderBoxes.push({ box: bx, kind: 'rail', fi });
+          }
+        }),
+      ),
+    );
+
     map.floors.forEach((f, fi) => {
       const Y = f.y;
+      const H = floorHeight(map, fi);
       const above = map.floors[fi + 1];
       f.tiles.forEach((row, z) =>
         [...row].forEach((t, x) => {
@@ -78,7 +113,7 @@ export class World {
             }
           }
           if (t === '.' || t === 'D') vis(box(x, Y - SLAB, z, x + 1, Y, z + 1), 'floor');
-          const holeOverStairs = t === ' ' && tile(map, fi - 1, x, z) === 'S';
+          const holeOverStairs = (t === ' ' || t === 'R') && tile(map, fi - 1, x, z) === 'S';
           const interior = t !== ' ' || holeOverStairs;
           if (interior && t !== 'S' && (!above || tile(map, fi + 1, x, z) === ' '))
             vis(box(x, Y + H - SLAB, z, x + 1, Y + H, z + 1), 'roof');
@@ -129,7 +164,7 @@ export class World {
       const fi = floorIndex(map, d.floor);
       const Y = map.floors[fi].y;
       for (const [x, z] of d.cells) {
-        dyn.push(box(x, Y, z, x + 1, Y + map.wallHeight, z + 1));
+        dyn.push(box(x, Y, z, x + 1, Y + floorHeight(map, fi), z + 1));
         closed.add(this.node(fi, x, z));
       }
     }

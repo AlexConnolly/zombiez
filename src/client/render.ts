@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { EYE, type GameEvent, type PowerupKind, type Sim, type Zombie } from '../sim/game';
-import { DIRS, floorIndex, placedPos, windowGeom, windowOpening, type V3 } from '../sim/map';
+import { DIRS, floorHeight, floorIndex, placedPos, windowGeom, windowOpening, type V3 } from '../sim/map';
 import { WEAPONS, type WeaponId } from '../sim/weapons';
 
 const C = {
@@ -282,7 +282,7 @@ export class Renderer {
       const base =
         kind === 'wall' ? (cellar(fi) ? 0x4b4842 : fi === map.floors.length - 1 ? 0x5d4f40 : C.plaster) :
         kind === 'floor' ? (cellar(fi) ? 0x3a3834 : 0x4a3424) :
-        kind === 'stair' ? 0x553c28 : 0x2e2822;
+        kind === 'stair' ? 0x553c28 : kind === 'rail' ? 0x2a1d14 : 0x2e2822;
       const n = Math.sin(b.min.x * 12.9898 + b.min.z * 78.233 + b.min.y * 3.1) * 43758.5453;
       col.setHex(base).multiplyScalar(0.92 + (n - Math.floor(n)) * 0.16);
       inst.setColorAt(i, col);
@@ -391,7 +391,7 @@ export class Renderer {
 
     for (const l of map.lamps) {
       const p = placedPos(map, l);
-      const top = p.y + map.wallHeight - 0.2;
+      const top = p.y + floorHeight(map, floorIndex(map, l.floor)) - 0.2;
       const light = new THREE.PointLight(C.lamp, 9, 11, 1.6);
       light.position.set(p.x, top - 0.7, p.z);
       this.lamps.push(light);
