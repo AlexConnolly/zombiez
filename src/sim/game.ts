@@ -61,7 +61,7 @@ export const POWERUPS: PowerupKind[] = ['maxAmmo', 'instaKill', 'doublePoints', 
 
 export type GameEvent =
   | { type: 'shot'; pid: string; weapon: WeaponId; from: V3; ends: V3[] }
-  | { type: 'hit'; zid: number; pos: V3; head: boolean }
+  | { type: 'hit'; zid: number; pos: V3; head: boolean; pid: string }
   | { type: 'kill'; zid: number; pos: V3; head: boolean; pid: string }
   | { type: 'points'; pid: string; amount: number }
   | { type: 'melee'; pid: string; hit: boolean }
@@ -431,7 +431,7 @@ export class Sim {
     const head = kind === 'head';
     if (z.hp > 0) {
       this.award(p, 10);
-      this.events.push({ type: 'hit', zid: z.id, pos: copy(z.pos), head });
+      this.events.push({ type: 'hit', zid: z.id, pos: copy(z.pos), head, pid: p.id });
       return;
     }
     this.award(p, kind === 'knife' ? 130 : head ? 100 : 60);

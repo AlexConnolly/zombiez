@@ -263,6 +263,7 @@ export class Renderer {
     this.debris.clear();
     for (const z of this.zombies.values()) z.root.removeFromParent();
     this.zombies.clear();
+    this.avatars.clear();
     for (const d of this.dying) d.z.root.removeFromParent();
     this.dying = [];
     this.lamps = [];
@@ -511,13 +512,15 @@ export class Renderer {
   onEvents(evs: GameEvent[], localId: string) {
     for (const e of evs) {
       switch (e.type) {
-        case 'shot':
-          if (e.pid !== localId) break;
-          this.recoil = Math.min(1, this.recoil + (e.weapon === 'barnburner' || e.weapon === 'longshot' ? 1 : 0.5));
-          this.muzzle.intensity = 6;
-          if (e.weapon === 'barnburner') this.shake = Math.max(this.shake, 0.25);
+        case 'shot': {
+          const mine = e.pid === localId;
+          if (mine) {
+            this.recoil = Math.min(1, this.recoil + (e.weapon === 'barnburner' || e.weapon === 'longshot' ? 1 : 0.5));
+            this.muzzle.intensity = 6;
+            if (e.weapon === 'barnburner') this.shake = Math.max(this.shake, 0.25);
+          }
           for (const end of e.ends.slice(0, 4)) {
-            const tip = this.gunTipWorld();
+            const tip = mine ? this.gunTipWorld() : new THREE.Vector3(e.from.x, e.from.y - 0.3, e.from.z);
             const g = new THREE.BufferGeometry().setFromPoints([tip, new THREE.Vector3(end.x, end.y, end.z)]);
             const l = new THREE.Line(g, TRACER);
             this.scene.add(l);
@@ -525,6 +528,7 @@ export class Renderer {
             this.particle(end, 0x8a8170, 2, 1.5, 0.04, 0.25);
           }
           break;
+        }
         case 'hit': {
           const zm = this.zombies.get(e.zid);
           if (zm) zm.flinch = 0.15;
@@ -580,7 +584,10 @@ export class Renderer {
 
   // ---------------------------------------------------------------- frame
 
-  frame(dt: number, alpha: number, prev: Map<string | number, Snap>, local: { id: string; yaw: number; pitch: number } | null, moving: boolean) {
+  /**
+   * local.id is the player the camera follows: yourself, or a teammate while you spectate.
+   */
+  frame(dt: number, alpha: number, prev: Map<string | number, Snap>, local: { id: string; yaw: number; pitch: number; spectate?: boolean } | null, moving: boolean) {
     this.time += dt;
     const s = this.sim.state;
     const lerp = (a: number, b: number) => a + (b - a) * alpha;
@@ -685,6 +692,8 @@ export class Renderer {
     }
     rp.needsUpdate = true;
 
+    this.updateAvatars(local?.id ?? '', dt);
+
     // Camera.
     const me = local && s.players.find((p) => p.id === local.id);
     if (me && local) {
@@ -695,9 +704,9 @@ export class Renderer {
       this.shake = Math.max(0, this.shake - dt * 2);
       const sh = this.reduceShake ? 0 : this.shake * this.shake;
       this.camera.position.set(lerp(p.x, me.pos.x) + (Math.random() - 0.5) * sh * 0.2, lerp(p.y, me.pos.y) + ((me.status !== 'alive') ? 0.35 : EYE) + bobY + (Math.random() - 0.5) * sh * 0.2, lerp(p.z, me.pos.z));
-      this.camera.rotation.set(local.pitch + this.recoil * 0.035, local.yaw, (me.status !== 'alive') ? 0.4 : 0);
+      this.camera.rotation.set(local.pitch + this.recoil * 0.035, local.yaw, me.status === 'down' ? 0.4 : 0);
       this.updateView(me.weapons[me.cur].id, me.reloadT > 0, dt);
-      this.view.visible = !(me.status !== 'alive');
+      this.view.visible = !local.spectate && (me.status === 'alive' || me.status === 'down');
     } else {
       // Menu: slow orbit around the house.
       const a = this.time * 0.05;
@@ -708,6 +717,80 @@ export class Renderer {
     this.renderer.render(this.scene, this.camera);
     if (!this.thumbnail && !me && this.time > 1) this.thumbnail = this.renderer.domElement.toDataURL('image/jpeg', 0.8);
   }
+
+  // ---------------------------------------------------------------- teammates
+
+  private avatars = new Map<string, { root: THREE.Group; body: THREE.Group; legs: THREE.Group[]; mats: THREE.MeshLambertMaterial[]; tag: THREE.Sprite; phase: number; last: V3; down: boolean }>();
+
+  private avatar(id: string, idx: number) {
+    const color = [0x3a6ea5, 0xa5543a, 0x3aa56e, 0xa59a3a][idx % 4];
+    const mat = (c: number) => new THREE.MeshLambertMaterial({ color: c, transparent: true });
+    const jacket = mat(0x2e3440), stripe = mat(color), skin = mat(0xc8a27c), pants = mat(0x22262e), dark = mat(0x1b1c1f);
+    const root = new THREE.Group();
+    const body = new THREE.Group();
+    root.add(body);
+    const legs = [-0.12, 0.12].map((x) => {
+      const g = new THREE.Group();
+      g.position.set(x, 0.78, 0);
+      g.add(boxMesh(0.18, 0.78, 0.22, pants, 0, -0.39, 0));
+      body.add(g);
+      return g;
+    });
+    body.add(boxMesh(0.5, 0.62, 0.3, jacket, 0, 1.08, 0), boxMesh(0.52, 0.12, 0.32, stripe, 0, 1.2, 0));
+    for (const x of [-0.3, 0.3]) {
+      const arm = new THREE.Group();
+      arm.position.set(x, 1.33, 0);
+      arm.rotation.x = -1.3;
+      arm.add(boxMesh(0.13, 0.55, 0.13, jacket, 0, -0.27, 0));
+      body.add(arm);
+    }
+    body.add(boxMesh(0.08, 0.1, 0.55, dark, 0.05, 1.25, -0.45));
+    body.add(boxMesh(0.28, 0.3, 0.28, skin, 0, 1.6, 0), boxMesh(0.3, 0.1, 0.3, stripe, 0, 1.76, 0));
+    const tagTex = tex(256, 64, (g) => {
+      g.font = '600 34px Oswald, Impact';
+      g.textAlign = 'center';
+      g.fillStyle = 'rgba(0,0,0,0.6)';
+      g.fillText(id, 130, 46);
+      g.fillStyle = '#' + color.toString(16).padStart(6, '0');
+      g.fillText(id, 128, 44);
+    });
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tagTex, depthTest: false, transparent: true }));
+    tag.scale.set(1.2, 0.3, 1);
+    tag.position.y = 2.15;
+    tag.renderOrder = 10;
+    root.add(tag);
+    this.level.add(root);
+    return { root, body, legs, mats: [jacket, stripe, skin, pants, dark], tag, phase: 0, last: { x: 0, y: 0, z: 0 }, down: false };
+  }
+
+  /** Teammates: walk animation, lying down when downed, see-through while reconnecting, hidden when out. */
+  private updateAvatars(viewId: string, dt: number) {
+    const seen = new Set<string>();
+    this.sim.state.players.forEach((p, i) => {
+      if (p.id === viewId || p.id === this.localId) return;
+      const show = p.status === 'alive' || p.status === 'down';
+      if (!show) return;
+      seen.add(p.id);
+      let a = this.avatars.get(p.id);
+      if (!a) { a = this.avatar(p.id, i); this.avatars.set(p.id, a); a.last = { ...p.pos }; }
+      a.root.position.set(p.pos.x, p.pos.y, p.pos.z);
+      a.root.rotation.y = p.yaw;
+      const speed = Math.hypot(p.pos.x - a.last.x, p.pos.z - a.last.z) / Math.max(dt, 1e-3);
+      a.last = { ...p.pos };
+      a.phase += dt * Math.min(speed, 7) * 2.2;
+      a.legs[0].rotation.x = Math.sin(a.phase) * Math.min(speed / 4, 1) * 0.6;
+      a.legs[1].rotation.x = -a.legs[0].rotation.x;
+      a.body.rotation.x = p.status === 'down' ? -1.35 : 0;
+      a.body.position.y = p.status === 'down' ? 0.25 : 0;
+      for (const m of a.mats) m.opacity = p.connected ? 1 : 0.35;
+      (a.tag.material as THREE.SpriteMaterial).color.set(p.status === 'down' ? 0xff4444 : 0xffffff);
+    });
+    for (const [id, a] of this.avatars)
+      if (!seen.has(id)) { a.root.removeFromParent(); dispose(a.root); this.avatars.delete(id); }
+  }
+
+  /** Set by the app so the renderer never draws an avatar for the local player. */
+  localId = '';
 
   private gun(id: WeaponId) {
     let g = this.guns.get(id);

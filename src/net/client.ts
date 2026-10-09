@@ -57,7 +57,8 @@ export class NetClient {
 
   constructor(
     readonly map: MapDef,
-    private send: (m: ClientMsg) => void,
+    /** Swapped for a new socket on reconnect. */
+    public send: (m: ClientMsg) => void,
     private now: () => number,
   ) {
     this.sim = new Sim(map, 0, []);

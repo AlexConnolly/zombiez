@@ -126,30 +126,30 @@ export class Sound {
     src.stop(t + dur + 0.05);
   }
 
-  private gun(w: WeaponId) {
+  private gun(w: WeaponId, at?: V3) {
     const r = 0.95 + Math.random() * 0.1;
     switch (w) {
       case 'barnburner':
-        this.hiss(0.45, 'lowpass', 2200 * r, { gain: 1.1, to: 300 });
-        this.tone(90, 0.3, 'sine', { gain: 0.9, to: 35 });
-        this.hiss(0.08, 'bandpass', 1400, { gain: 0.25, delay: 0.35, q: 4 });
+        this.hiss(0.45, 'lowpass', 2200 * r, { at, gain: 1.1, to: 300 });
+        this.tone(90, 0.3, 'sine', { at, gain: 0.9, to: 35 });
+        this.hiss(0.08, 'bandpass', 1400, { at, gain: 0.25, delay: 0.35, q: 4 });
         break;
       case 'longshot':
-        this.hiss(0.6, 'lowpass', 4000 * r, { gain: 1.0, to: 200 });
-        this.tone(110, 0.4, 'sine', { gain: 0.8, to: 30 });
+        this.hiss(0.6, 'lowpass', 4000 * r, { at, gain: 1.0, to: 200 });
+        this.tone(110, 0.4, 'sine', { at, gain: 0.8, to: 30 });
         break;
       case 'bucket':
-        this.tone(160, 0.18, 'sine', { gain: 0.8, to: 60 });
-        this.hiss(0.12, 'lowpass', 900, { gain: 0.5 });
+        this.tone(160, 0.18, 'sine', { at, gain: 0.8, to: 60 });
+        this.hiss(0.12, 'lowpass', 900, { at, gain: 0.5 });
         break;
       case 'zapper':
-        this.tone(1400 * r, 0.25, 'square', { gain: 0.18, to: 180 });
-        this.tone(700 * r, 0.3, 'sawtooth', { gain: 0.15, to: 90 });
+        this.tone(1400 * r, 0.25, 'square', { at, gain: 0.18, to: 180 });
+        this.tone(700 * r, 0.3, 'sawtooth', { at, gain: 0.15, to: 90 });
         break;
       default: {
         const big = w === 'thumper';
-        this.hiss(big ? 0.22 : 0.16, 'lowpass', (w === 'p9' ? 3000 : 2600) * r, { gain: big ? 0.8 : 0.6, to: 400 });
-        this.tone(big ? 95 : 120, 0.12, 'sine', { gain: 0.6, to: 45 });
+        this.hiss(big ? 0.22 : 0.16, 'lowpass', (w === 'p9' ? 3000 : 2600) * r, { at, gain: big ? 0.8 : 0.6, to: 400 });
+        this.tone(big ? 95 : 120, 0.12, 'sine', { at, gain: 0.6, to: 45 });
       }
     }
   }
@@ -189,13 +189,14 @@ export class Sound {
       switch (e.type) {
         case 'shot': {
           if (e.pid === localId) this.gun(e.weapon);
+          else this.gun(e.weapon, e.from);
           break;
         }
         case 'hit':
-          this.tone(e.head ? 1500 : 1900, 0.04, 'square', { gain: 0.12 });
+          if (e.pid === localId) this.tone(e.head ? 1500 : 1900, 0.04, 'square', { gain: 0.12 });
           break;
         case 'kill':
-          if (!e.pid) break;
+          if (e.pid !== localId) break;
           this.tone(e.head ? 900 : 1900, e.head ? 0.08 : 0.04, 'square', { gain: e.head ? 0.2 : 0.12 });
           if (e.head) this.hiss(0.1, 'bandpass', 700, { gain: 0.6, at: e.pos, q: 2 });
           break;
@@ -268,6 +269,12 @@ export class Sound {
           break;
         case 'boxMove':
           for (let i = 0; i < 4; i++) this.tone(300 - i * 50, 0.3, 'square', { gain: 0.12, delay: i * 0.25 });
+          break;
+        case 'down':
+          if (e.pid === localId) { this.tone(70, 1.2, 'sine', { gain: 1.2, to: 35 }); this.hiss(1, 'lowpass', 500, { gain: 0.6 }); }
+          break;
+        case 'revive':
+          for (const [f, d] of [[523, 0], [784, 0.1]] as const) this.tone(f, 0.5, 'triangle', { gain: 0.2, delay: d });
           break;
         case 'gameOver':
           this.tone(110, 3, 'sawtooth', { gain: 0.3, to: 40, attack: 0.1 });

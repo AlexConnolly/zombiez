@@ -126,3 +126,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 #banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-size: 44px; color: var(--ink); text-shadow: 0 2px 12px #000; opacity: 0; transition: opacity .4s; }
 #banner.on { opacity: 1; }
 #lockhint { position: absolute; top: 40%; left: 0; right: 0; text-align: center; font-size: 36px; text-shadow: 0 2px 12px #000; }
+#progress { position: absolute; top: calc(65% + 34px); left: 50%; transform: translateX(-50%); width: 180px; height: 5px; background: rgba(0,0,0,.5); opacity: 0; }
+#progress.on { opacity: 1; }
+#progress div { height: 100%; width: 0; background: var(--ink); }
+#team { position: absolute; right: 40px; bottom: 120px; text-align: right; font: 600 16px Inter; text-shadow: 0 2px 6px #000; display: flex; flex-direction: column; gap: 4px; }
+#team .pts { font: 600 20px Oswald; color: var(--gold); margin-left: 10px; }
+#team .off { color: var(--quiet); }
+#team .downed { color: #ff5a5a; }
+#status { position: absolute; bottom: 22%; left: 0; right: 0; text-align: center; font-size: 26px; text-shadow: 0 2px 10px #000; }
+#status.bad { color: #ff5a5a; }
+.form input[type=text], .form input:not([type]) { width: 260px; padding: 8px 10px; background: #15151a; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); font: 16px Inter; }
+.form .primary { margin-top: 6px; }

@@ -25,6 +25,9 @@
     <div id="ammo"><div id="wname" class="cond"></div><div class="cond"><span id="mag"></span><span id="reserve"></span></div></div>
     <div id="banner" class="cond"></div>
     <div id="lockhint" class="cond hidden">Click to aim</div>
+    <div id="progress"><div></div></div>
+    <div id="team"></div>
+    <div id="status" class="cond"></div>
   </div>
 
   <!-- Menus -->
@@ -36,7 +39,7 @@
     </div>
     <nav class="list">
       <button class="btn" data-go="select">Singleplayer</button>
-      <button class="btn dim" disabled>Multiplayer<span class="tag">Coming soon</span></button>
+      <button class="btn" data-go="online">Multiplayer</button>
       <button class="btn" data-go="settings">Settings</button>
       <button class="btn" data-go="scores">High scores</button>
     </nav>
@@ -81,6 +84,19 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div id="menu-online" class="screen dim-bg">
+    <button class="back cond" data-go="main">&lsaquo; Back</button>
+    <div class="cond h1">Multiplayer</div>
+    <div class="panel form">
+      <label>Name <input id="on-name" maxlength="16" autocomplete="off"></label>
+      <label>Game code <input id="on-match" maxlength="32" autocomplete="off"></label>
+      <label>Server <input id="on-server" autocomplete="off"></label>
+      <button class="primary cond" id="on-join">Join game</button>
+      <div class="hint" id="on-error"></div>
+    </div>
+    <div class="foot hint">Everyone who joins with the same game code plays together.</div>
   </div>
 
   <div id="menu-settings" class="screen dim-bg">

@@ -2,11 +2,14 @@ import farmhouse from '../maps/farmhouse.json';
 import { NO_INPUT, Sim, TICK, type Command, type GameEvent } from '../sim/game';
 import type { MapDef } from '../sim/map';
 import { WEAPONS } from '../sim/weapons';
+import { NetClient } from '../net/client';
+import type { ServerMsg } from '../net/protocol';
 import { Sound } from './audio';
 import { Renderer, type Snap } from './render';
 
 const map = farmhouse as MapDef;
-const LOCAL = 'p1';
+/** The local player's id: 'p1' in solo, your name online. */
+let localId = 'p1';
 const DEBUG = new URLSearchParams(location.search).has('debug');
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const $$ = (sel: string) => [...document.querySelectorAll<HTMLElement>(sel)];
@@ -45,6 +48,9 @@ let app: 'menu' | 'playing' | 'paused' | 'over' = 'menu';
 let prev = new Map<string | number, Snap>();
 let startTick = 0;
 let settingsBack = 'main';
+
+/** The online session, or null in solo. The NetClient survives reconnects; only the socket is replaced. */
+let online: { net: NetClient; ws: WebSocket | null; url: string; name: string; match: string; leaving: boolean; retryUntil: number; started: boolean } | null = null;
 let overTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ---------------------------------------------------------------- input
@@ -62,7 +68,7 @@ addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey) return;
   keys.add(e.code);
   if (app === 'playing' && ['Digit1', 'Digit2'].includes(e.code)) {
-    const me = sim.player(LOCAL);
+    const me = sim.player(localId);
     if (me && me.cur !== Number(e.code.slice(-1)) - 1) swapPulse = true;
   }
   if (app === 'menu') menuKeys(e);
@@ -191,6 +197,8 @@ function renderScores() {
 
 function startGame() {
   clearTimeout(overTimer);
+  localId = 'p1';
+  renderer.localId = localId;
   sound.start();
   sim = new Sim(map, mode === 'daily' ? dailySeed() : (Math.random() * 2 ** 31) | 0);
   if (DEBUG) Object.assign(window, { sim, setLook: (y: number, p: number) => ((yaw = y), (pitch = p)) });
@@ -204,7 +212,7 @@ function startGame() {
   lock();
 }
 $('#start').addEventListener('click', startGame);
-$('#again').addEventListener('click', startGame);
+$('#again').addEventListener('click', () => (online ? (leaveOnline(), startOnline()) : startGame()));
 $('#to-menu').addEventListener('click', toMenu);
 $('#quit').addEventListener('click', toMenu);
 function resume() {
@@ -216,8 +224,86 @@ function resume() {
 $('#resume').addEventListener('click', resume);
 $('#pause').addEventListener('click', (e) => { if (e.target === e.currentTarget) resume(); });
 
+const onlinePrefs = load('zombiez.online', { name: '', match: '', server: `ws://${location.hostname || 'localhost'}:8787` });
+$<HTMLInputElement>('#on-name').value = onlinePrefs.name;
+$<HTMLInputElement>('#on-match').value = onlinePrefs.match;
+$<HTMLInputElement>('#on-server').value = onlinePrefs.server;
+
+function startOnline() {
+  const name = $<HTMLInputElement>('#on-name').value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 16);
+  const match = $<HTMLInputElement>('#on-match').value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+  const url = $<HTMLInputElement>('#on-server').value.trim();
+  if (!name || !match) { $('#on-error').textContent = 'Enter a name and a game code.'; return; }
+  save('zombiez.online', { name, match, server: url });
+  sound.start();
+  clearTimeout(overTimer);
+  const net = new NetClient(map, () => {}, () => performance.now());
+  online = { net, ws: null, url, name, match, leaving: false, retryUntil: 0, started: false };
+  $('#on-error').textContent = 'Connecting...';
+  connect();
+  lock();
+}
+$('#on-join').addEventListener('click', startOnline);
+
+function connect() {
+  const o = online;
+  if (!o) return;
+  let ws: WebSocket;
+  try { ws = new WebSocket(o.url); } catch { $('#on-error').textContent = 'That server address is not valid.'; return; }
+  o.ws = ws;
+  o.net.send = (m) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
+  ws.onopen = () => o.net.join(o.match, o.name);
+  ws.onmessage = (e) => {
+    const m = JSON.parse(String(e.data)) as ServerMsg;
+    o.net.receive(m);
+    if (m.t === 'welcome') {
+      o.retryUntil = 0;
+      status('');
+      $('#on-error').textContent = '';
+      if (!o.started) {
+        o.started = true;
+        localId = o.net.you;
+        renderer.localId = localId;
+        sim = o.net.sim;
+        renderer.load(sim);
+        startTick = sim.state.tick;
+        yaw = 0;
+        pitch = 0;
+        acc = 0;
+        app = 'playing';
+        show(null);
+      }
+    }
+    if (m.t === 'error') {
+      o.leaving = true;
+      $('#on-error').textContent = m.reason === 'version' ? 'The game was updated. Refresh the page.' : 'Could not join that game.';
+      if (o.started) toMenu();
+    }
+  };
+  ws.onclose = () => {
+    if (online !== o || o.leaving || o.net.ended) return;
+    if (!o.started) { $('#on-error').textContent = 'Could not reach the server.'; online = null; return; }
+    // Lost connection: retry every second for the grace period.
+    if (!o.retryUntil) o.retryUntil = performance.now() + 60_000;
+    if (performance.now() > o.retryUntil) { status('Connection lost.', true); return; }
+    status('Reconnecting...', true);
+    setTimeout(connect, 1000);
+  };
+}
+
+function leaveOnline() {
+  if (!online) return;
+  online.leaving = true;
+  online.net.leave();
+  online.ws?.close();
+  online = null;
+  localId = 'p1';
+  renderer.localId = localId;
+}
+
 function toMenu() {
   clearTimeout(overTimer);
+  leaveOnline();
   app = 'menu';
   sim = menuSim;
   renderer.load(menuSim);
@@ -226,10 +312,12 @@ function toMenu() {
 }
 
 function pause() {
+  // Online the game keeps running; the menu only stops your input.
   app = 'paused';
   fire = false;
   keys.clear();
-  $('#pause-info').textContent = `Round ${sim.state.round} · ${sim.player(LOCAL)!.points.toLocaleString()} points`;
+  $('#pause-info').textContent = `Round ${sim.state.round} · ${sim.player(localId)!.points.toLocaleString()} points${online ? ' · the game is still running' : ''}`;
+  $('#quit').textContent = online ? 'Leave match' : 'Quit to menu';
   show('pause');
 }
 
@@ -238,14 +326,16 @@ function gameOver() {
   app = 'over';
   if (document.pointerLockElement) document.exitPointerLock();
   const s = sim.state;
-  const me = sim.player(LOCAL)!;
+  const me = sim.player(localId)!;
   const before = bestRound();
-  const scores = loadScores();
-  scores.push({ map: map.id, round: s.round, kills: me.stats.kills, mode, date: today() });
-  save('zombiez.scores', scores);
+  if (!online) {
+    const scores = loadScores();
+    scores.push({ map: map.id, round: s.round, kills: me.stats.kills, mode, date: today() });
+    save('zombiez.scores', scores);
+  }
   $('#go-round').textContent = String(s.round);
   $('#go-rounds-word').textContent = s.round === 1 ? 'round' : 'rounds';
-  $('#go-best').classList.toggle('hidden', s.round <= before);
+  $('#go-best').classList.toggle('hidden', !!online || s.round <= before);
   const secs = Math.round((s.tick - startTick) * TICK);
   const opened = Object.values(s.doors).filter(Boolean).length;
   const pct = me.stats.kills ? Math.round((me.stats.headshots / me.stats.kills) * 100) : 0;
@@ -272,6 +362,13 @@ const hud = {
   prompt: $('#prompt'), perks: $('#perks'), damage: $('#damage'), effects: $('#effects'), hit: $('#hitmarker'), banner: $('#banner'),
 };
 let shownRound = -1;
+const statusEl = $('#status');
+let statusText = '';
+function status(text: string, bad = false) {
+  statusText = text;
+  statusEl.textContent = text;
+  statusEl.classList.toggle('bad', bad);
+}
 let hitT = 0;
 let bannerT = 0;
 
@@ -292,14 +389,14 @@ const PU_NAMES = { maxAmmo: 'Max Ammo', instaKill: 'Insta-Kill', doublePoints: '
 
 function hudEvents(evs: GameEvent[]) {
   for (const e of evs) {
-    if (e.type === 'points' && e.pid === LOCAL) {
+    if (e.type === 'points' && e.pid === localId) {
       const d = document.createElement('div');
       d.textContent = `+${e.amount}`;
       d.style.left = `${Math.random() * 20}px`;
       d.addEventListener('animationend', () => d.remove());
       hud.pops.append(d);
     }
-    if ((e.type === 'hit' || e.type === 'kill') && ('pid' in e ? e.pid === LOCAL : true)) {
+    if ((e.type === 'hit' || e.type === 'kill') && ('pid' in e ? e.pid === localId : true)) {
       hitT = 0.15;
       hud.hit.classList.toggle('kill', e.type === 'kill');
     }
@@ -313,7 +410,7 @@ function hudEvents(evs: GameEvent[]) {
 
 function updateHud(dt: number) {
   const s = sim.state;
-  const me = sim.player(LOCAL);
+  const me = sim.player(localId);
   if (!me) return;
   hud.points.textContent = me.points.toLocaleString();
   if (shownRound !== s.round) { hud.round.innerHTML = s.round ? tally(s.round) : ''; shownRound = s.round; }
@@ -322,7 +419,7 @@ function updateHud(dt: number) {
   hud.mag.textContent = String(w.mag);
   hud.mag.classList.toggle('low', w.mag <= WEAPONS[w.id].mag * 0.25);
   hud.reserve.textContent = ` / ${w.reserve}`;
-  const it = sim.interaction(LOCAL);
+  const it = sim.interaction(localId);
   const cost = it && 'cost' in it ? it.cost : 0;
   hud.prompt.innerHTML = !it ? '' : it.kind === 'info' ? it.label : `<span class="key">E</span>${it.label}${cost ? ` <span class="cost">${cost.toLocaleString()}</span>` : ''}`;
   hud.prompt.classList.toggle('poor', cost > me.points);
@@ -334,6 +431,33 @@ function updateHud(dt: number) {
   hud.hit.classList.toggle('on', hitT > 0);
   bannerT -= dt;
   if (bannerT <= 0) hud.banner.classList.remove('on');
+
+  // Hold progress for rebuilding and reviving.
+  const holdTime = it?.kind === 'revive' ? 3 * (me.perks.includes('quick') ? 0.5 : 1) : it?.kind === 'window' ? 0.75 : 0;
+  const holding = !!holdTime && keys.has('KeyE') && me.holdId === ('id' in it! ? it.id : '');
+  $('#progress').classList.toggle('on', holding);
+  ($('#progress').firstElementChild as HTMLElement).style.width = holding ? `${Math.min(100, (me.useT / holdTime) * 100)}%` : '0';
+
+  // Team panel and your own state.
+  const mates = s.players.filter((p) => p.id !== localId && p.status !== 'left');
+  $('#team').innerHTML = mates.map((p) => {
+    const state = !p.connected ? `<span class="off">reconnecting ${Math.ceil(p.graceT)}s</span>` :
+      p.status === 'down' ? `<span class="downed">down ${Math.ceil(p.bleedT)}s</span>` :
+      p.status === 'dead' || p.status === 'away' ? '<span class="off">out</span>' : '';
+    return `<div>${p.id} ${state}<span class="pts">${p.points.toLocaleString()}</span></div>`;
+  }).join('');
+  if (statusText.startsWith('Reconnecting') || statusText.startsWith('Connection')) return;
+  const watching = spectating();
+  if (me.status === 'down') status(`You are down · ${Math.ceil(me.bleedT)}s · a teammate can revive you`, true);
+  else if (watching) status(`Spectating ${watching.id} · back next round`);
+  else if (statusText) status('');
+}
+
+/** While you are out, the camera follows the first teammate still standing. */
+function spectating() {
+  const me = sim.player(localId);
+  if (!me || (me.status !== 'dead' && me.status !== 'away')) return null;
+  return sim.state.players.find((p) => p.id !== localId && p.status === 'alive') ?? null;
 }
 
 // ---------------------------------------------------------------- loop
@@ -342,9 +466,9 @@ function tick(c: Command) {
   prev = new Map();
   for (const z of sim.state.zombies) prev.set(z.id, { ...z.pos, yaw: z.yaw });
   for (const p of sim.state.players) prev.set(p.id, { ...p.pos, yaw: p.yaw });
-  const evs = sim.step({ [LOCAL]: c });
-  renderer.onEvents(evs, LOCAL);
-  sound.events(evs, sim, LOCAL);
+  const evs = sim.step({ [localId]: c });
+  renderer.onEvents(evs, localId);
+  sound.events(evs, sim, localId);
   hudEvents(evs);
 }
 
@@ -353,7 +477,7 @@ if (DEBUG)
     /** Steps the game from the console, for testing in a hidden tab. */
     advance(seconds: number, c: Partial<Command> = {}) {
       for (let i = 0; i < Math.round(seconds / TICK); i++) tick({ ...command(), ...c });
-      renderer.frame(TICK, 1, prev, { id: LOCAL, yaw, pitch }, false);
+      renderer.frame(TICK, 1, prev, { id: localId, yaw, pitch }, false);
       updateHud(TICK);
     },
   });
@@ -363,18 +487,30 @@ let acc = 0;
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (app === 'playing') {
+  if (online?.started) {
+    acc += dt;
+    while (acc >= TICK) {
+      if (!online.net.ended) online.net.tick(app === 'playing' ? command() : { ...NO_INPUT, yaw, pitch });
+      acc -= TICK;
+    }
+    online.net.frame(dt);
+    const evs = online.net.drainEvents();
+    renderer.onEvents(evs, localId);
+    sound.events(evs, sim, localId);
+    hudEvents(evs);
+  } else if (app === 'playing' && !online) {
     acc += dt;
     while (acc >= TICK) {
       tick(command());
       acc -= TICK;
     }
   }
-  const local = app === 'menu' ? null : { id: LOCAL, yaw, pitch };
+  const watching = app === 'menu' ? null : spectating();
+  const local = app === 'menu' ? null : watching ? { id: watching.id, yaw: watching.yaw, pitch: watching.pitch, spectate: true } : { id: localId, yaw, pitch };
   const moving = app === 'playing' && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].some((k) => keys.has(k));
-  renderer.frame(dt, app === 'playing' ? acc / TICK : 1, prev, local, moving);
+  renderer.frame(dt, app === 'playing' && !online ? acc / TICK : 1, online ? new Map() : prev, local, moving);
   const cam = renderer.camera.position;
-  sound.update(dt, sim, LOCAL, { x: cam.x, y: cam.y, z: cam.z, yaw: app === 'menu' ? 0 : yaw }, moving, keys.has('ShiftLeft'));
+  sound.update(dt, sim, localId, { x: cam.x, y: cam.y, z: cam.z, yaw: app === 'menu' ? 0 : yaw }, moving, keys.has('ShiftLeft'));
   if (app !== 'menu') updateHud(dt);
   if (app === 'menu' && renderer.thumbnail && !$('.thumb').style.backgroundImage) show($$('.screen.on')[0]?.id ?? 'menu-main');
   requestAnimationFrame(frame);
