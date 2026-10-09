@@ -57,6 +57,9 @@ let swapPulse = false;
 const canvas = renderer.renderer.domElement;
 
 addEventListener('keydown', (e) => {
+  // Browser shortcuts (save, print, find...) open dialogs that steal the mouse mid-game.
+  if (app === 'playing' && (e.ctrlKey || e.metaKey) && e.code !== 'KeyW') e.preventDefault();
+  if (e.ctrlKey || e.metaKey) return;
   keys.add(e.code);
   if (app === 'playing' && ['Digit1', 'Digit2'].includes(e.code)) {
     const me = sim.player(LOCAL);
@@ -84,7 +87,10 @@ addEventListener('mousemove', (e) => {
   pitch = Math.max(-1.5, Math.min(1.5, pitch - e.movementY * k * (settings.invert ? -1 : 1)));
 });
 addEventListener('contextmenu', (e) => e.preventDefault());
-document.addEventListener('pointerlockerror', () => $('#lockhint').classList.toggle('hidden', DEBUG));
+document.addEventListener('pointerlockerror', () => {
+  console.warn('[zombiez] pointer lock refused');
+  $('#lockhint').classList.toggle('hidden', DEBUG);
+});
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
   $('#lockhint').classList.toggle('hidden', locked || DEBUG);
@@ -113,7 +119,7 @@ function command(): Command {
 // The browser refuses a lock asked for too soon after one was released; the hint asks for another click.
 const lock = () => {
   $('#lockhint').classList.toggle('hidden', DEBUG);
-  canvas.requestPointerLock()?.catch?.(() => {});
+  canvas.requestPointerLock()?.catch?.((err: unknown) => console.warn('[zombiez] pointer lock failed', err));
 };
 
 // ---------------------------------------------------------------- screens
@@ -201,12 +207,14 @@ $('#start').addEventListener('click', startGame);
 $('#again').addEventListener('click', startGame);
 $('#to-menu').addEventListener('click', toMenu);
 $('#quit').addEventListener('click', toMenu);
-$('#resume').addEventListener('click', () => {
+function resume() {
   app = 'playing';
   show(null);
   sound.start();
   lock();
-});
+}
+$('#resume').addEventListener('click', resume);
+$('#pause').addEventListener('click', (e) => { if (e.target === e.currentTarget) resume(); });
 
 function toMenu() {
   clearTimeout(overTimer);

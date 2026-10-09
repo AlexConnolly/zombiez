@@ -279,6 +279,15 @@ describe('movement', () => {
   });
 });
 
+describe('weapon progression', () => {
+  it('the start zone only sells the bolt rifle; the SMG is behind the first door', () => {
+    const zoneOf = (floor: string) => (floor === 'ground' ? 'A' : floor === 'upper' ? 'B' : 'C');
+    const start = map.wallBuys.filter((w) => zoneOf(w.floor) === map.startZone).map((w) => w.weapon);
+    expect(start).toEqual(['longshot']);
+    expect(map.wallBuys.find((w) => w.weapon === 'ripper')!.floor).toBe('upper');
+  });
+});
+
 describe('input', () => {
   it('a missing command keeps the player aim', () => {
     const sim = quiet();

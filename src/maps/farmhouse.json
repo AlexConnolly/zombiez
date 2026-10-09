@@ -99,9 +99,9 @@
     { "floor": "cellar", "cells": [[2, 10], [3, 10], [2, 11], [3, 11], [2, 12], [3, 12], [2, 13], [3, 13]], "up": "n" }
   ],
   "wallBuys": [
-    { "weapon": "ripper", "floor": "ground", "cell": [8, 2], "facing": "n" },
-    { "weapon": "barnburner", "floor": "upper", "cell": [2, 9], "facing": "w" },
-    { "weapon": "longshot", "floor": "cellar", "cell": [8, 2], "facing": "n" }
+    { "weapon": "longshot", "floor": "ground", "cell": [8, 2], "facing": "n" },
+    { "weapon": "ripper", "floor": "upper", "cell": [2, 9], "facing": "w" },
+    { "weapon": "barnburner", "floor": "cellar", "cell": [8, 2], "facing": "n" }
   ],
   "boxSpots": [
     { "floor": "upper", "cell": [6, 4], "zone": "B" },
