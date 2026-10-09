@@ -24,10 +24,16 @@ const EFFECT_TIME = 30;
 const DROP_CHANCE = 0.02;
 const MAX_DROPS = 4;
 const ZOMBIE_DAMAGE = 50;
+const BLEED_TIME = 30;
+const REVIVE_TIME = 3;
+const REVIVE_RANGE = 1.5;
+const CRAWL = 1;
+export const GRACE_TIME = 60;
 
 export const zombieHp = (round: number) =>
   Math.round(round < 10 ? 150 + 100 * (round - 1) : 950 * 1.1 ** (round - 9));
 export const zombieCount = (round: number, players = 1) => Math.min(24, 6 + round * 2) + (players - 1) * 6;
+export const hpScale = (players: number) => (players >= 4 ? 1.5 : players === 3 ? 1.25 : 1);
 export const spawnInterval = (round: number) => Math.max(0.6, 2.5 - round * 0.15);
 export const runChance = (round: number) => (round < 4 ? 0 : Math.min(0.85, (round - 3) * 0.15));
 
@@ -55,7 +61,8 @@ export type GameEvent =
   | { type: 'kill'; zid: number; pos: V3; head: boolean; pid: string }
   | { type: 'points'; pid: string; amount: number }
   | { type: 'melee'; pid: string; hit: boolean }
-  | { type: 'empty' | 'reload' | 'swap' | 'denied' | 'down'; pid: string }
+  | { type: 'empty' | 'reload' | 'swap' | 'denied' | 'down' | 'bleedOut' | 'respawn' | 'disconnect' | 'reconnect' | 'away' | 'left'; pid: string }
+  | { type: 'revive'; pid: string; by: string }
   | { type: 'hurt'; pid: string; hp: number }
   | { type: 'board'; window: string; boards: number; torn: boolean }
   | { type: 'zombieAttack' | 'spawn' | 'climb'; zid: number }
@@ -86,7 +93,14 @@ export interface Player {
   fireCD: number;
   meleeCD: number;
   perks: PerkId[];
-  down: boolean;
+  /** alive: playing. down: last stand, can be revived. dead: bled out, respawns next round. away: grace ran out, respawns next round if back. left: gone. */
+  status: 'alive' | 'down' | 'dead' | 'away' | 'left';
+  connected: boolean;
+  /** Seconds of reconnect grace left while disconnected. */
+  graceT: number;
+  bleedT: number;
+  /** What the player is holding Use on (window or player id); a new target restarts the timer. */
+  holdId: string;
   hurtT: number;
   useT: number;
   boardPts: number;
@@ -138,6 +152,7 @@ export interface Game {
 
 export type Interaction =
   | { kind: 'window'; id: string; label: string; hold: true }
+  | { kind: 'revive'; id: string; label: string; hold: true }
   | { kind: 'door'; id: string; label: string; cost: number }
   | { kind: 'wall'; weapon: WeaponId; label: string; cost: number }
   | { kind: 'box'; label: string; cost: number }
@@ -199,7 +214,11 @@ export class Sim {
         fireCD: 0,
         meleeCD: 0,
         perks: [],
-        down: false,
+        status: 'alive',
+        connected: true,
+        graceT: 0,
+        bleedT: 0,
+        holdId: '',
         hurtT: 99,
         useT: 0,
         boardPts: 0,
@@ -218,7 +237,10 @@ export class Sim {
   step(cmds: Record<string, Command>): GameEvent[] {
     this.events = [];
     const s = this.state;
-    if (s.phase !== 'over') {
+    this.updateGrace();
+    // Nobody connected: the world freezes until someone returns or every grace period runs out.
+    const frozen = !s.players.some((p) => p.connected);
+    if (s.phase !== 'over' && !frozen) {
       for (const p of s.players) this.updatePlayer(p, cmds[p.id] ?? { ...NO_INPUT, yaw: p.yaw, pitch: p.pitch });
       this.updateRound();
       this.updateFlows();
@@ -230,6 +252,7 @@ export class Sim {
       s.instaKill = Math.max(0, s.instaKill - TICK);
       s.doublePoints = Math.max(0, s.doublePoints - TICK);
     }
+    this.checkOver();
     s.tick++;
     return this.events;
   }
@@ -237,22 +260,22 @@ export class Sim {
   // ---------------------------------------------------------------- players
 
   private updatePlayer(p: Player, c: Command) {
-    if (p.down) return;
-    p.yaw = c.yaw;
-    p.pitch = Math.max(-1.5, Math.min(1.5, c.pitch));
-    let f = c.fwd;
-    let r = c.strafe;
-    const len = Math.hypot(f, r);
-    if (len > 1) { f /= len; r /= len; }
-    const speed = (c.sprint && f > 0 ? SPRINT : WALK) * TICK;
-    const sin = Math.sin(p.yaw);
-    const cos = Math.cos(p.yaw);
-    const dx = (-sin * f + cos * r) * speed;
-    const dz = (-cos * f - sin * r) * speed;
-    moveBody(p, dx, dz, TICK, PLAYER_HW, PLAYER_H, this.world.body());
-
-    p.hurtT += TICK;
-    if (p.hurtT > 4) p.hp = Math.min(p.maxHp, p.hp + 100 * TICK);
+    if (!p.connected || (p.status !== 'alive' && p.status !== 'down')) return;
+    const down = p.status === 'down';
+    movePlayer(p, c, this.world, down);
+    if (down) {
+      p.bleedT -= TICK;
+      if (p.bleedT <= 0) {
+        p.status = 'dead';
+        p.perks = [];
+        this.events.push({ type: 'bleedOut', pid: p.id });
+        return;
+      }
+      c = { ...c, swap: false, melee: false, use: false };
+    } else {
+      p.hurtT += TICK;
+      if (p.hurtT > 4) p.hp = Math.min(p.maxHp, p.hp + 100 * TICK);
+    }
 
     p.fireCD -= TICK;
     p.meleeCD -= TICK;
@@ -286,14 +309,20 @@ export class Sim {
     if (p.weapons[p.cur].mag === 0 && p.reloadT <= 0 && p.fireCD <= 0) this.startReload(p);
 
     const it = c.use ? this.interaction(p.id) : null;
-    if (it?.kind === 'window') {
+    if (it?.kind === 'window' || it?.kind === 'revive') {
+      if (p.holdId !== it.id) { p.holdId = it.id; p.useT = 0; }
       p.useT += TICK;
-      if (p.useT >= REBUILD_TIME) {
+      if (it.kind === 'window' && p.useT >= REBUILD_TIME) {
         p.useT = 0;
         this.rebuild(p, it.id);
       }
+      if (it.kind === 'revive' && p.useT >= REVIVE_TIME * (p.perks.includes('quick') ? 0.5 : 1)) {
+        p.useT = 0;
+        this.revive(p, it.id);
+      }
     } else {
       p.useT = 0;
+      p.holdId = '';
       if (it && edge('use')) this.use(p, it);
     }
     p.prev = { fire: c.fire, use: c.use, swap: c.swap, reload: c.reload, melee: c.melee };
@@ -432,22 +461,102 @@ export class Sim {
     this.events.push({ type: 'hurt', pid: p.id, hp: p.hp });
     if (p.hp > 0) return;
     p.hp = 0;
-    p.down = true;
+    p.status = 'down';
+    p.bleedT = BLEED_TIME;
+    p.reloadT = 0;
     this.events.push({ type: 'down', pid: p.id });
-    if (this.state.players.every((o) => o.down)) {
-      this.state.phase = 'over';
-      this.events.push({ type: 'gameOver', round: this.state.round });
+  }
+
+  private revive(by: Player, id: string) {
+    const p = this.player(id);
+    if (!p || p.status !== 'down') return;
+    p.status = 'alive';
+    p.hp = 50;
+    p.hurtT = 0;
+    p.bleedT = 0;
+    this.award(by, 100);
+    this.events.push({ type: 'revive', pid: p.id, by: by.id });
+  }
+
+  /** Over when nobody is left standing. A disconnected player still in their grace period counts as standing. */
+  private checkOver() {
+    const s = this.state;
+    if (s.phase === 'over' || s.players.some((p) => p.status === 'alive')) return;
+    s.phase = 'over';
+    this.events.push({ type: 'gameOver', round: s.round });
+  }
+
+  private updateGrace() {
+    for (const p of this.state.players) {
+      if (p.connected || p.graceT <= 0) continue;
+      p.graceT -= TICK;
+      if (p.graceT > 0) continue;
+      if (p.status === 'alive' || p.status === 'down') this.dropFromRound();
+      if (p.status !== 'left') p.status = 'away';
+      this.events.push({ type: 'away', pid: p.id });
     }
+  }
+
+  /** A player who stops counting mid-round takes their share of the remaining zombies with them. */
+  private dropFromRound() {
+    this.state.toSpawn = Math.max(0, this.state.toSpawn - 6);
+  }
+
+  disconnect(id: string) {
+    const p = this.player(id);
+    if (!p || !p.connected) return;
+    p.connected = false;
+    p.graceT = GRACE_TIME;
+    this.events.push({ type: 'disconnect', pid: id });
+  }
+
+  /** Inside the grace period play resumes in place; after it, the player respawns at the next round. */
+  connect(id: string) {
+    const p = this.player(id);
+    if (!p || p.connected || p.status === 'left') return false;
+    p.connected = true;
+    p.graceT = 0;
+    this.events.push({ type: 'reconnect', pid: id });
+    return true;
+  }
+
+  leave(id: string) {
+    const p = this.player(id);
+    if (!p || p.status === 'left') return;
+    if (p.status === 'alive' || p.status === 'down') this.dropFromRound();
+    p.status = 'left';
+    p.connected = false;
+    p.graceT = 0;
+    this.events.push({ type: 'left', pid: id });
+  }
+
+  /** Players counted for zombie numbers: connected and still in the match. */
+  activeCount() {
+    return Math.max(1, this.state.players.filter((p) => p.connected && p.status !== 'left').length);
+  }
+
+  private respawn(p: Player, i: number) {
+    const sp = this.map.playerSpawns[i % this.map.playerSpawns.length];
+    if (p.status === 'dead') {
+      p.weapons = [{ id: 'p9', mag: WEAPONS.p9.mag, reserve: WEAPONS.p9.reserve }];
+      p.cur = 0;
+      p.points = Math.max(p.points, 500);
+    }
+    Object.assign(p, { pos: placedPos(this.map, sp), vy: 0, onGround: true, hp: 100, maxHp: 100, perks: [], status: 'alive', reloadT: 0, bleedT: 0, hurtT: 99 });
+    this.events.push({ type: 'respawn', pid: p.id });
   }
 
   // ---------------------------------------------------------------- interactions
 
   interaction(pid: string): Interaction | null {
     const p = this.player(pid);
-    if (!p || p.down) return null;
+    if (!p || p.status !== 'alive' || !p.connected) return null;
     const s = this.state;
     const map = this.map;
     const opts: [number, Interaction][] = [];
+    for (const o of s.players)
+      if (o !== p && o.status === 'down' && dist2(o.pos, p.pos) <= REVIVE_RANGE ** 2 && Math.abs(o.pos.y - p.pos.y) < 1.2)
+        opts.push([-1, { kind: 'revive', id: o.id, label: `Hold to revive ${o.id}`, hold: true }]);
     const near = (pos: V3, range = USE_RANGE) => {
       if (Math.abs(pos.y - p.pos.y) > 1.2) return -1;
       const d = dist2(pos, p.pos);
@@ -574,10 +683,13 @@ export class Sim {
       if (s.phaseT > 0) return;
       s.round++;
       s.phase = 'active';
-      s.toSpawn = zombieCount(s.round, s.players.length);
+      s.toSpawn = zombieCount(s.round, this.activeCount());
       s.spawnT = 1;
       s.drops = 0;
-      for (const p of s.players) p.boardPts = 0;
+      s.players.forEach((p, i) => {
+        p.boardPts = 0;
+        if (p.connected && (p.status === 'dead' || p.status === 'away')) this.respawn(p, i);
+      });
       this.events.push({ type: 'roundStart', round: s.round });
       return;
     }
@@ -612,7 +724,7 @@ export class Sim {
       vy: 0,
       onGround: true,
       yaw: 0,
-      hp: zombieHp(Math.max(1, s.round)),
+      hp: Math.round(zombieHp(Math.max(1, s.round)) * hpScale(this.activeCount())),
       run: this.rand() < runChance(s.round),
       state: 'approach',
       window: w.id,
@@ -700,7 +812,7 @@ export class Sim {
     let target: Player | null = null;
     let best = Infinity;
     for (const p of s.players) {
-      if (p.down) continue;
+      if (p.status !== 'alive' || !p.connected) continue;
       const f = this.flows.get(p.id);
       const d = f && z.node >= 0 ? f.field[z.node] : Infinity;
       const cost = Number.isFinite(d) ? d : 1e6 + Math.sqrt(dist2(p.pos, z.pos));
@@ -793,7 +905,7 @@ export class Sim {
     const s = this.state;
     for (const pu of [...s.powerups]) {
       pu.t -= TICK;
-      const taker = s.players.find((p) => !p.down && dist2(p.pos, pu.pos) < 1.2 * 1.2 && Math.abs(p.pos.y + 0.6 - pu.pos.y) < 1.5);
+      const taker = s.players.find((p) => p.status === 'alive' && p.connected && dist2(p.pos, pu.pos) < 1.2 * 1.2 && Math.abs(p.pos.y + 0.6 - pu.pos.y) < 1.5);
       if (!taker && pu.t > 0) continue;
       s.powerups = s.powerups.filter((o) => o !== pu);
       if (taker) this.applyPowerup(pu.id, pu.kind);
@@ -811,7 +923,7 @@ export class Sim {
         this.removeZombie(z);
         this.events.push({ type: 'kill', zid: z.id, pos: copy(z.pos), head: false, pid: '' });
       }
-      for (const p of s.players) if (!p.down) this.award(p, 400);
+      for (const p of s.players) if (p.status !== 'left') this.award(p, 400);
     }
   }
 
@@ -848,6 +960,20 @@ export class Sim {
     for (const id of pool) if ((r -= WEAPONS[id].boxWeight) < 0) return id;
     return pool[pool.length - 1];
   }
+}
+
+/** One tick of player movement. The server sim and client prediction both use this, so they move the same way. */
+export function movePlayer(p: Pick<Player, 'pos' | 'vy' | 'onGround' | 'yaw' | 'pitch'>, c: Command, world: World, down = false) {
+  p.yaw = c.yaw;
+  p.pitch = Math.max(-1.5, Math.min(1.5, c.pitch));
+  let f = c.fwd;
+  let r = c.strafe;
+  const len = Math.hypot(f, r);
+  if (len > 1) { f /= len; r /= len; }
+  const speed = (down ? CRAWL : c.sprint && f > 0 ? SPRINT : WALK) * TICK;
+  const sin = Math.sin(p.yaw);
+  const cos = Math.cos(p.yaw);
+  moveBody(p, (-sin * f + cos * r) * speed, (-cos * f - sin * r) * speed, TICK, PLAYER_HW, PLAYER_H, world.body());
 }
 
 export function zombieBoxes(z: Zombie): [Box, Box] {

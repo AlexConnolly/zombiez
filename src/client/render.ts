@@ -694,10 +694,10 @@ export class Renderer {
       this.recoil = Math.max(0, this.recoil - dt * 6);
       this.shake = Math.max(0, this.shake - dt * 2);
       const sh = this.reduceShake ? 0 : this.shake * this.shake;
-      this.camera.position.set(lerp(p.x, me.pos.x) + (Math.random() - 0.5) * sh * 0.2, lerp(p.y, me.pos.y) + (me.down ? 0.35 : EYE) + bobY + (Math.random() - 0.5) * sh * 0.2, lerp(p.z, me.pos.z));
-      this.camera.rotation.set(local.pitch + this.recoil * 0.035, local.yaw, me.down ? 0.4 : 0);
+      this.camera.position.set(lerp(p.x, me.pos.x) + (Math.random() - 0.5) * sh * 0.2, lerp(p.y, me.pos.y) + ((me.status !== 'alive') ? 0.35 : EYE) + bobY + (Math.random() - 0.5) * sh * 0.2, lerp(p.z, me.pos.z));
+      this.camera.rotation.set(local.pitch + this.recoil * 0.035, local.yaw, (me.status !== 'alive') ? 0.4 : 0);
       this.updateView(me.weapons[me.cur].id, me.reloadT > 0, dt);
-      this.view.visible = !me.down;
+      this.view.visible = !(me.status !== 'alive');
     } else {
       // Menu: slow orbit around the house.
       const a = this.time * 0.05;

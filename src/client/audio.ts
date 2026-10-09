@@ -304,7 +304,7 @@ export class Sound {
     this.drone.gain.setTargetAtTime(s.phase === 'active' ? (s.zombies.length / 24) * 0.05 : 0, now, 1);
 
     const me = sim.player(localId);
-    const low = me && !me.down && me.hp < me.maxHp * 0.4;
+    const low = me && !(me.status !== 'alive') && me.hp < me.maxHp * 0.4;
     this.muffle.frequency.setTargetAtTime(low ? 700 : 20000, now, 0.2);
     if (low) {
       this.beatT -= dt;
