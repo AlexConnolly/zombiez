@@ -45,7 +45,7 @@ let app: 'menu' | 'playing' | 'paused' | 'over' = 'menu';
 let prev = new Map<string | number, Snap>();
 let startTick = 0;
 let settingsBack = 'main';
-let overTimer = 0;
+let overTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ---------------------------------------------------------------- input
 

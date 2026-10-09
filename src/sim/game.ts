@@ -24,6 +24,8 @@ const EFFECT_TIME = 30;
 const DROP_CHANCE = 0.02;
 const MAX_DROPS = 4;
 const ZOMBIE_DAMAGE = 50;
+/** Lag compensation looks back at most this many ticks (~350 ms: 250 ms ping + 100 ms interpolation). */
+export const MAX_REWIND = 11;
 const BLEED_TIME = 30;
 const REVIVE_TIME = 3;
 const REVIVE_RANGE = 1.5;
@@ -49,6 +51,8 @@ export interface Command {
   reload: boolean;
   swap: boolean;
   melee: boolean;
+  /** Online only: the server tick the client was showing when this command was made. Shots are checked against zombies as they were then. */
+  view?: number;
 }
 export const NO_INPUT: Command = { fwd: 0, strafe: 0, yaw: 0, pitch: 0, sprint: false, fire: false, use: false, reload: false, swap: false, melee: false };
 
@@ -168,6 +172,8 @@ export class Sim {
   readonly state: Game;
   events: GameEvent[] = [];
   private flows = new Map<string, { field: Float64Array; node: number }>();
+  /** Zombie positions for the last second, by tick, for lag-compensated shots. */
+  private history: { tick: number; pos: Map<number, V3> }[] = [];
 
   constructor(readonly map: MapDef, seed: number, playerIds: string[] = ['p1']) {
     this.world = new World(map);
@@ -196,41 +202,25 @@ export class Sim {
     };
     this.state = s;
     s.box.moveAt = 4 + Math.floor(this.rand() * 5);
-    s.players = playerIds.map((id, i) => {
-      const sp = map.playerSpawns[i % map.playerSpawns.length];
-      return {
-        id,
-        pos: placedPos(map, sp),
-        vy: 0,
-        onGround: true,
-        yaw: 0,
-        pitch: 0,
-        hp: 100,
-        maxHp: 100,
-        points: 500,
-        weapons: [{ id: 'p9', mag: WEAPONS.p9.mag, reserve: WEAPONS.p9.reserve }],
-        cur: 0,
-        reloadT: 0,
-        fireCD: 0,
-        meleeCD: 0,
-        perks: [],
-        status: 'alive',
-        connected: true,
-        graceT: 0,
-        bleedT: 0,
-        holdId: '',
-        hurtT: 99,
-        useT: 0,
-        boardPts: 0,
-        prev: { fire: false, use: false, swap: false, reload: false, melee: false },
-        stats: { kills: 0, headshots: 0, earned: 0, boards: 0 },
-        flowNode: -1,
-      };
-    });
+    s.players = playerIds.map((id, i) => ({ ...newPlayer(id), pos: placedPos(map, map.playerSpawns[i % map.playerSpawns.length]) }));
     this.world.update(s.doors, s.box.spot);
   }
 
   rand() { return next(this.state.rng); }
+
+  /** Movement only, for inputs that arrive late and are caught up in one server tick. */
+  extraMove(id: string, c: Command) {
+    const p = this.player(id);
+    if (p && p.connected && (p.status === 'alive' || p.status === 'down')) movePlayer(p, c, this.world, p.status === 'down');
+  }
+
+  /** Adds a player mid-match (dev matches and tests; lobby matches start with everyone). */
+  addPlayer(id: string) {
+    const s = this.state;
+    if (this.player(id)) return;
+    const sp = this.map.playerSpawns[s.players.length % this.map.playerSpawns.length];
+    s.players.push({ ...newPlayer(id), pos: placedPos(this.map, sp) });
+  }
 
   player(id: string) { return this.state.players.find((p) => p.id === id); }
 
@@ -254,6 +244,8 @@ export class Sim {
     }
     this.checkOver();
     s.tick++;
+    this.history.push({ tick: s.tick, pos: new Map(s.zombies.map((z) => [z.id, copy(z.pos)])) });
+    if (this.history.length > 30) this.history.shift();
     return this.events;
   }
 
@@ -300,7 +292,7 @@ export class Sim {
     const trigger = def.auto ? c.fire : edge('fire');
     if (trigger && p.fireCD <= 0 && p.reloadT <= 0 && p.meleeCD < KNIFE.cooldown - 0.3) {
       const cw = p.weapons[p.cur];
-      if (cw.mag > 0) this.fire(p);
+      if (cw.mag > 0) this.fire(p, c.view);
       else if (edge('fire')) {
         this.events.push({ type: 'empty', pid: p.id });
         this.startReload(p);
@@ -343,7 +335,23 @@ export class Sim {
     return v(-Math.sin(p.yaw) * cp, Math.sin(p.pitch), -Math.cos(p.yaw) * cp);
   }
 
-  private fire(p: Player) {
+  /** Where a zombie was at a past (fractional) tick, or where it is now if that is unknown. */
+  private rewound(z: Zombie, view: number | undefined): Zombie {
+    const now = this.state.tick;
+    if (view === undefined || view >= now) return z;
+    const t = Math.max(now - MAX_REWIND, view);
+    const h = this.history;
+    for (let i = h.length - 1; i > 0; i--) {
+      if (h[i - 1].tick > t) continue;
+      const a = h[i - 1].pos.get(z.id), b = h[i].pos.get(z.id);
+      if (!a || !b) return z;
+      const k = (t - h[i - 1].tick) / (h[i].tick - h[i - 1].tick);
+      return { ...z, pos: v(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k) };
+    }
+    return z;
+  }
+
+  private fire(p: Player, view?: number) {
     const w = p.weapons[p.cur];
     const def = WEAPONS[w.id];
     w.mag--;
@@ -364,7 +372,7 @@ export class Sim {
       let hitZ: Zombie | null = null;
       let head = false;
       for (const z of this.state.zombies) {
-        const [bodyBox, headBox] = zombieBoxes(z);
+        const [bodyBox, headBox] = zombieBoxes(this.rewound(z, view));
         const th = rayBox(o, dir, headBox);
         const tb = rayBox(o, dir, bodyBox);
         const t = Math.min(th, tb);
@@ -481,7 +489,7 @@ export class Sim {
   /** Over when nobody is left standing. A disconnected player still in their grace period counts as standing. */
   private checkOver() {
     const s = this.state;
-    if (s.phase === 'over' || s.players.some((p) => p.status === 'alive')) return;
+    if (s.phase === 'over' || !s.players.length || s.players.some((p) => p.status === 'alive')) return;
     s.phase = 'over';
     this.events.push({ type: 'gameOver', round: s.round });
   }
@@ -960,6 +968,37 @@ export class Sim {
     for (const id of pool) if ((r -= WEAPONS[id].boxWeight) < 0) return id;
     return pool[pool.length - 1];
   }
+}
+
+function newPlayer(id: string): Player {
+  return {
+    id,
+    pos: { x: 0, y: 0, z: 0 },
+    vy: 0,
+    onGround: true,
+    yaw: 0,
+    pitch: 0,
+    hp: 100,
+    maxHp: 100,
+    points: 500,
+    weapons: [{ id: 'p9', mag: WEAPONS.p9.mag, reserve: WEAPONS.p9.reserve }],
+    cur: 0,
+    reloadT: 0,
+    fireCD: 0,
+    meleeCD: 0,
+    perks: [],
+    status: 'alive',
+    connected: true,
+    graceT: 0,
+    bleedT: 0,
+    holdId: '',
+    hurtT: 99,
+    useT: 0,
+    boardPts: 0,
+    prev: { fire: false, use: false, swap: false, reload: false, melee: false },
+    stats: { kills: 0, headshots: 0, earned: 0, boards: 0 },
+    flowNode: -1,
+  };
 }
 
 /** One tick of player movement. The server sim and client prediction both use this, so they move the same way. */
