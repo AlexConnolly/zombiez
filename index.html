@@ -86,17 +86,107 @@
     </div>
   </div>
 
+  <div id="menu-login" class="screen dim-bg">
+    <button class="back cond" data-go="main">&lsaquo; Back</button>
+    <div class="cond h1">Multiplayer</div>
+    <div class="seg tabs">
+      <button class="cond on" data-tab="login">Log in</button>
+      <button class="cond" data-tab="signup">Sign up</button>
+      <button class="cond" data-tab="recover">Forgot password</button>
+    </div>
+    <form class="panel form" id="auth-form" autocomplete="on">
+      <label>Username <input id="au-name" name="username" maxlength="16" autocomplete="username"></label>
+      <label class="tab-recover">Recovery code <input id="au-code" maxlength="9" autocomplete="off" placeholder="XXXX-XXXX"></label>
+      <label>Password <input id="au-pass" type="password" maxlength="200" autocomplete="current-password"></label>
+      <div class="hint tab-signup">At least 10 characters. There is no email, so you will get recovery codes instead: keep them safe.</div>
+      <div class="hint tab-recover">Use one of your recovery codes and choose a new password.</div>
+      <button class="primary cond" id="au-go" type="submit">Log in</button>
+      <div class="hint err" id="au-err"></div>
+    </form>
+  </div>
+
+  <div id="menu-codes" class="screen dim-bg">
+    <div class="cond h1">Your recovery codes</div>
+    <div class="panel form">
+      <div class="hint">Each code works once. They are the only way back in if you forget your password. You will not see them again.</div>
+      <div class="codes" id="codes"></div>
+      <div class="row">
+        <button class="ghost cond" id="codes-copy" type="button">Copy</button>
+        <button class="ghost cond" id="codes-save" type="button">Download</button>
+      </div>
+      <label class="check"><input type="checkbox" id="codes-ok"> I have saved these codes</label>
+      <button class="primary cond" id="codes-done" disabled>Continue</button>
+    </div>
+  </div>
+
   <div id="menu-online" class="screen dim-bg">
     <button class="back cond" data-go="main">&lsaquo; Back</button>
     <div class="cond h1">Multiplayer</div>
+    <div class="hint big" id="on-who"></div>
+    <nav class="list">
+      <button class="btn" id="on-quick">Quick Play</button>
+      <button class="btn" id="on-create">Create lobby</button>
+      <div class="joinrow"><input id="on-code" maxlength="4" placeholder="CODE" autocomplete="off"><button class="btn" id="on-join">Join lobby</button></div>
+      <button class="btn" data-go="leaderboard">Leaderboard</button>
+      <button class="btn" data-go="profile">Profile</button>
+    </nav>
+    <div class="hint err" id="on-err"></div>
+    <div class="foot hint" id="on-pings"></div>
+  </div>
+
+  <div id="menu-queue" class="screen dim-bg">
+    <div class="cond h1">Finding players</div>
     <div class="panel form">
-      <label>Name <input id="on-name" maxlength="16" autocomplete="off"></label>
-      <label>Game code <input id="on-match" maxlength="32" autocomplete="off"></label>
-      <label>Server <input id="on-server" autocomplete="off"></label>
-      <button class="primary cond" id="on-join">Join game</button>
-      <div class="hint" id="on-error"></div>
+      <div class="cond queue-big"><span id="q-found">1</span> / 4</div>
+      <div class="hint big" id="q-info"></div>
+      <button class="ghost cond" id="q-cancel">Cancel</button>
     </div>
-    <div class="foot hint">Everyone who joins with the same game code plays together.</div>
+  </div>
+
+  <div id="menu-lobby" class="screen dim-bg">
+    <button class="back cond" id="lb-leave">&lsaquo; Leave lobby</button>
+    <div class="cond h1">Lobby <span class="gold" id="lb-code"></span></div>
+    <div class="panel form">
+      <div class="row"><button class="ghost cond" id="lb-copy">Copy invite link</button><span class="hint" id="lb-region"></span></div>
+      <table id="lb-members"></table>
+      <div class="seg" id="lb-mode">
+        <button class="cond on" data-lmode="normal">Normal</button>
+        <button class="cond" data-lmode="daily">Daily seed</button>
+      </div>
+      <div class="row">
+        <button class="ghost cond" id="lb-ready">Ready</button>
+        <button class="primary cond" id="lb-start">Start</button>
+      </div>
+      <div class="hint err" id="lb-err"></div>
+    </div>
+  </div>
+
+  <div id="menu-profile" class="screen dim-bg">
+    <button class="back cond" data-go="online">&lsaquo; Back</button>
+    <div class="cond h1" id="pf-name"></div>
+    <div class="panel form">
+      <div class="hint big" id="pf-stats"></div>
+      <label>Current password <input id="pf-pass" type="password" autocomplete="current-password"></label>
+      <label>New password <input id="pf-new" type="password" autocomplete="new-password"></label>
+      <div class="row">
+        <button class="ghost cond" id="pf-change">Change password</button>
+        <button class="ghost cond" id="pf-codes">New recovery codes</button>
+      </div>
+      <div class="row">
+        <button class="ghost cond" id="pf-logout">Log out</button>
+        <button class="ghost cond danger" id="pf-delete">Delete account</button>
+      </div>
+      <div class="hint err" id="pf-msg"></div>
+    </div>
+  </div>
+
+  <div id="menu-leaderboard" class="screen dim-bg">
+    <button class="back cond" data-go="online">&lsaquo; Back</button>
+    <div class="cond h1">Leaderboard</div>
+    <div class="boards">
+      <div class="panel form"><div class="cond label">Best round · The Farmhouse</div><table id="lbd-best"></table></div>
+      <div class="panel form"><div class="cond label">Today's daily seed</div><table id="lbd-daily"></table></div>
+    </div>
   </div>
 
   <div id="menu-settings" class="screen dim-bg">

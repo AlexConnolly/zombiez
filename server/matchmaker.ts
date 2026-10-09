@@ -13,8 +13,11 @@ export function limitFor(waitMs: number) {
 
 const best = (p: Pings) => Object.entries(p).sort((a, b) => a[1] - b[1])[0]?.[0];
 
-/** The region with the lowest worst-player ping, among regions every player measured. */
-export function pickRegion(pings: Pings[], regions: string[]): { region: string; worst: number } | null {
+/** The region with the lowest worst-player ping, among regions every player (with ping data) measured. */
+export function pickRegion(all: Pings[], regions: string[]): { region: string; worst: number } | null {
+  // A player whose pings have not arrived yet should not block a region choice for everyone else.
+  const pings = all.filter((p) => Object.keys(p).length);
+  if (!pings.length) return regions.length ? { region: regions[0], worst: 0 } : null;
   let out: { region: string; worst: number } | null = null;
   for (const r of regions) {
     if (!pings.every((p) => typeof p[r] === 'number')) continue;

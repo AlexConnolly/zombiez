@@ -14,6 +14,9 @@ describe('region choice', () => {
     expect(pickRegion([EU, US_E], regions)).toEqual({ region: 'iad', worst: 90 });
     expect(pickRegion([EU, EU], regions)).toEqual({ region: 'lhr', worst: 20 });
   });
+  it('a player with no ping data yet does not block the choice', () => {
+    expect(pickRegion([EU, {}], regions)).toEqual({ region: 'lhr', worst: 20 });
+  });
 });
 
 describe('quick play', () => {

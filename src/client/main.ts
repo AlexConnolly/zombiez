@@ -4,7 +4,9 @@ import type { MapDef } from '../sim/map';
 import { WEAPONS } from '../sim/weapons';
 import { NetClient } from '../net/client';
 import type { ServerMsg } from '../net/protocol';
+import { Account } from './account';
 import { Sound } from './audio';
+import { initLobbyUi } from './lobby-ui';
 import { Renderer, type Snap } from './render';
 
 const map = farmhouse as MapDef;
@@ -50,7 +52,8 @@ let startTick = 0;
 let settingsBack = 'main';
 
 /** The online session, or null in solo. The NetClient survives reconnects; only the socket is replaced. */
-let online: { net: NetClient; ws: WebSocket | null; url: string; name: string; match: string; leaving: boolean; retryUntil: number; started: boolean } | null = null;
+let online: { net: NetClient; ws: WebSocket | null; url: string; matchId: string; token: string; leaving: boolean; retryUntil: number; started: boolean } | null = null;
+const account = new Account();
 let overTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ---------------------------------------------------------------- input
@@ -144,6 +147,9 @@ function show(id: string | null) {
 function go(target: string) {
   if (target === 'settings' && app === 'paused') settingsBack = 'pause';
   if (target === 'main' && settingsBack === 'pause' && app === 'paused') { settingsBack = 'main'; return show('pause'); }
+  if (target === 'online') return lobbyUi.openOnline();
+  if (target === 'profile') void lobbyUi.openProfile();
+  if (target === 'leaderboard') void lobbyUi.openLeaderboard();
   show(`menu-${target}`);
 }
 $$('[data-go]').forEach((b) => b.addEventListener('click', () => { sound.start(); go(b.dataset.go!); }));
@@ -161,10 +167,10 @@ function menuKeys(e: KeyboardEvent) {
   }
 }
 
-$$('.seg button').forEach((b) =>
+$$('[data-mode]').forEach((b) =>
   b.addEventListener('click', () => {
     mode = b.dataset.mode as typeof mode;
-    $$('.seg button').forEach((o) => o.classList.toggle('on', o === b));
+    $$('[data-mode]').forEach((o) => o.classList.toggle('on', o === b));
   }),
 );
 $('#daily-date').textContent = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -212,7 +218,11 @@ function startGame() {
   lock();
 }
 $('#start').addEventListener('click', startGame);
-$('#again').addEventListener('click', () => (online ? (leaveOnline(), startOnline()) : startGame()));
+$('#again').addEventListener('click', () => {
+  if (!online) return startGame();
+  toMenu();
+  lobbyUi.openOnline();
+});
 $('#to-menu').addEventListener('click', toMenu);
 $('#quit').addEventListener('click', toMenu);
 function resume() {
@@ -224,42 +234,39 @@ function resume() {
 $('#resume').addEventListener('click', resume);
 $('#pause').addEventListener('click', (e) => { if (e.target === e.currentTarget) resume(); });
 
-const onlinePrefs = load('zombiez.online', { name: '', match: '', server: `ws://${location.hostname || 'localhost'}:8787` });
-$<HTMLInputElement>('#on-name').value = onlinePrefs.name;
-$<HTMLInputElement>('#on-match').value = onlinePrefs.match;
-$<HTMLInputElement>('#on-server').value = onlinePrefs.server;
+const lobbyUi = initLobbyUi({
+  account,
+  show: (id) => show(id),
+  current: () => $$('.screen.on')[0]?.id,
+  onMatch: (url, matchId, token) => startOnline(url, matchId, token),
+  inGame: () => !!online,
+});
 
-function startOnline() {
-  const name = $<HTMLInputElement>('#on-name').value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 16);
-  const match = $<HTMLInputElement>('#on-match').value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
-  const url = $<HTMLInputElement>('#on-server').value.trim();
-  if (!name || !match) { $('#on-error').textContent = 'Enter a name and a game code.'; return; }
-  save('zombiez.online', { name, match, server: url });
+/** Joins a match on a game server with a ticket from the control service. */
+function startOnline(url: string, matchId: string, token: string) {
   sound.start();
   clearTimeout(overTimer);
+  leaveOnline();
   const net = new NetClient(map, () => {}, () => performance.now());
-  online = { net, ws: null, url, name, match, leaving: false, retryUntil: 0, started: false };
-  $('#on-error').textContent = 'Connecting...';
+  online = { net, ws: null, url, matchId, token, leaving: false, retryUntil: 0, started: false };
+  status('Joining...');
   connect();
   lock();
 }
-$('#on-join').addEventListener('click', startOnline);
 
 function connect() {
   const o = online;
   if (!o) return;
-  let ws: WebSocket;
-  try { ws = new WebSocket(o.url); } catch { $('#on-error').textContent = 'That server address is not valid.'; return; }
+  const ws = new WebSocket(o.url);
   o.ws = ws;
   o.net.send = (m) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
-  ws.onopen = () => o.net.join(o.match, o.name);
+  ws.onopen = () => o.net.join(o.matchId, o.token);
   ws.onmessage = (e) => {
     const m = JSON.parse(String(e.data)) as ServerMsg;
     o.net.receive(m);
     if (m.t === 'welcome') {
       o.retryUntil = 0;
       status('');
-      $('#on-error').textContent = '';
       if (!o.started) {
         o.started = true;
         localId = o.net.you;
@@ -276,17 +283,20 @@ function connect() {
     }
     if (m.t === 'error') {
       o.leaving = true;
-      $('#on-error').textContent = m.reason === 'version' ? 'The game was updated. Refresh the page.' : 'Could not join that game.';
+      status(m.reason === 'version' ? 'The game was updated. Refresh the page.' : 'Could not join that game.', true);
       if (o.started) toMenu();
+      else { online = null; lobbyUi.openOnline(); }
     }
   };
-  ws.onclose = () => {
+  ws.onclose = async () => {
     if (online !== o || o.leaving || o.net.ended) return;
-    if (!o.started) { $('#on-error').textContent = 'Could not reach the server.'; online = null; return; }
-    // Lost connection: retry every second for the grace period.
     if (!o.retryUntil) o.retryUntil = performance.now() + 60_000;
     if (performance.now() > o.retryUntil) { status('Connection lost.', true); return; }
     status('Reconnecting...', true);
+    // Tickets expire after 60 s, so ask the control service for a fresh one each try.
+    const t = await account.rejoin();
+    if (online !== o) return;
+    if (t.token && t.url && t.matchId === o.matchId) { o.token = t.token; o.url = t.url; }
     setTimeout(connect, 1000);
   };
 }
@@ -518,3 +528,11 @@ function frame(now: number) {
 
 show('menu-main');
 requestAnimationFrame(frame);
+
+// Logged in from an earlier visit? Restore the session and drop straight back into a running match.
+void account.refresh().then(async (ok) => {
+  if (!ok) { if (new URLSearchParams(location.search).has('join')) lobbyUi.openOnline(); return; }
+  const t = await account.rejoin();
+  if (t.token && t.url && t.matchId && app === 'menu') startOnline(t.url, t.matchId, t.token);
+  else if (new URLSearchParams(location.search).has('join')) lobbyUi.openOnline();
+});

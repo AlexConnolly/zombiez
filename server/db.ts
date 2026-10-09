@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 
@@ -14,6 +15,7 @@ export async function openDb(url = process.env.DATABASE_URL, dataDir?: string): 
     const pool = new pg.Pool({ connectionString: url, max: 5 });
     db = { query: (sql, params) => pool.query(sql, params) as never, close: () => pool.end() };
   } else {
+    if (dataDir) mkdirSync(dataDir, { recursive: true });
     const lite = new PGlite(dataDir);
     db = { query: (sql, params) => lite.query(sql, params) as never, close: () => lite.close() };
   }
