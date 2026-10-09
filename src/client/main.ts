@@ -45,6 +45,14 @@ let menuSim = new Sim(map, 0);
 renderer.load(menuSim);
 /** Menu snapshots per map, taken while that map is behind the menu. */
 const thumbs: Record<string, string> = {};
+for (const m of MAPS) {
+  renderer.load(new Sim(m, 0));
+  renderer.thumbnail = null;
+  renderer.frame(1.5, 1, new Map(), null, false);
+  if (renderer.thumbnail) thumbs[m.id] = renderer.thumbnail;
+}
+renderer.load(menuSim);
+renderer.thumbnail = thumbs[map.id] ?? null;
 
 function chooseMap(id: string) {
   if (id === map.id) return;
@@ -155,7 +163,8 @@ function show(id: string | null) {
   $('#confirm-blurb').textContent = BLURBS[map.id] ?? '';
   $$('#map-cards .card[data-map]').forEach((c) => c.classList.toggle('sel', c.dataset.map === map.id));
   if (id === 'menu-scores') renderScores();
-  const first = id ? $(`#${id}`).querySelector<HTMLElement>('.card, .btn:not(:disabled), .primary, #again') : null;
+  const scr = id ? $(`#${id}`) : null;
+  const first = scr?.querySelector<HTMLElement>('.card.sel') ?? scr?.querySelector<HTMLElement>('.card, .btn:not(:disabled), .primary, #again');
   first?.focus();
 }
 
@@ -177,6 +186,12 @@ $('#map-cards').insertAdjacentHTML('afterbegin', MAPS.map((m) => `
     </div>
   </button>`).join(''));
 $$('[data-go]').forEach((b) => b.addEventListener('click', () => { sound.start(); if (b.dataset.map) chooseMap(b.dataset.map); go(b.dataset.go!); }));
+
+// The mouse moves focus, so the mouse and the keyboard never highlight two items at once.
+document.addEventListener('mouseover', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.screen .btn, .screen .card');
+  if (b && b !== document.activeElement && !(b as HTMLButtonElement).disabled) b.focus();
+});
 
 function menuKeys(e: KeyboardEvent) {
   const scr = $$('.screen.on')[0];
