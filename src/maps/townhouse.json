@@ -2033,6 +2033,82 @@
       "playerDamage": 50
     }
   ],
+  "secret": {
+    "count": 3,
+    "drop": {
+      "floor": "basement",
+      "cell": [
+        4,
+        6
+      ]
+    },
+    "spots": [
+      {
+        "floor": "second",
+        "cell": [
+          10,
+          3
+        ],
+        "name": "wardrobe"
+      },
+      {
+        "floor": "basement",
+        "cell": [
+          2,
+          6
+        ],
+        "name": "coal store"
+      },
+      {
+        "floor": "first",
+        "cell": [
+          6,
+          4
+        ],
+        "name": "piano stool"
+      },
+      {
+        "floor": "first",
+        "cell": [
+          5,
+          18
+        ],
+        "name": "bookshelf"
+      },
+      {
+        "floor": "second",
+        "cell": [
+          8,
+          11
+        ],
+        "name": "bath"
+      },
+      {
+        "floor": "attic",
+        "cell": [
+          2,
+          2
+        ],
+        "name": "water tank"
+      },
+      {
+        "floor": "basement",
+        "cell": [
+          3,
+          17
+        ],
+        "name": "under-stairs store"
+      },
+      {
+        "floor": "attic",
+        "cell": [
+          9,
+          16
+        ],
+        "name": "trunk"
+      }
+    ]
+  },
   "links": [
     {
       "a": {

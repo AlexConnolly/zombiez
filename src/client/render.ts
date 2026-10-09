@@ -167,6 +167,8 @@ export class Renderer {
   private knife = new THREE.Group();
   private bat = new THREE.Group();
   private trapFx = new Map<string, THREE.PointLight>();
+  private books: THREE.Mesh[] = [];
+  private hatch = new THREE.Group();
   private recoil = 0;
   private melee = 0;
   private bob = 0;
@@ -550,6 +552,28 @@ export class Renderer {
         this.level.add(boxMesh(0.9, 0.9, 0.9, lamC(0x2a1e14), p.x + 0.1, p.y + 1.25, p.z), boxMesh(0.7, 0.6, 0.02, basic(0x0a0a0a), p.x - 0.36, p.y + 1.25, p.z).rotateY(Math.PI / 2));
       }
 
+    this.books = [];
+    this.hatch = new THREE.Group();
+    if (map.secret) {
+      // Ration books: small buff booklets, faintly lit so a careful player spots them.
+      const bookMat = new THREE.MeshLambertMaterial({ color: 0xc8b27a, emissive: 0x3a3018 });
+      this.books = map.secret.spots.map((sp) => {
+        const p = placedPos(map, sp);
+        const b = boxMesh(0.16, 0.03, 0.22, bookMat, p.x, p.y + 0.8, p.z);
+        b.rotation.y = p.x * 1.3;
+        this.level.add(b);
+        return b;
+      });
+      const p = placedPos(map, map.secret.drop);
+      this.hatch.position.set(p.x, p.y, p.z);
+      this.hatch.add(boxMesh(1.1, 0.06, 1.1, lamC(0x1a1c1a), 0, 0.03, 0));
+      const lid = new THREE.Group();
+      lid.position.set(0, 0.07, -0.5);
+      lid.add(boxMesh(1, 0.05, 1, lamC(0x4a5040), 0, 0, 0.5));
+      this.hatch.add(lid);
+      this.level.add(this.hatch);
+    }
+
     // Mystery box: crate with a gold glow, lid that opens, and a weapon that floats out.
     this.box = new THREE.Group();
     const q = tex(128, 128, (g) => {
@@ -774,6 +798,9 @@ export class Renderer {
     for (const w of this.sim.map.windows) this.boards.get(w.id)!.forEach((b, i) => (b.visible = i < s.windows[w.id].boards));
     for (const [id, g] of this.debris) g.visible = !s.doors[id];
     for (const p of this.perkPanels) p.emissiveIntensity = s.power ? 0.9 : 0;
+    this.books.forEach((b, i) => (b.visible = s.secret.spots.includes(i)));
+    const lid = this.hatch.children[1];
+    if (lid && this.sim.map.secret) lid.rotation.x = s.secret.placed >= this.sim.map.secret.count ? -1.8 : 0;
     for (const [id, l] of this.trapFx) {
       const ts = s.traps[id];
       if (ts?.fuse > 0) l.intensity = 6 + Math.random() * 3;

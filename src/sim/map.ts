@@ -62,6 +62,8 @@ export interface MapDef {
   traps?: (Placed & { id: string; cost: number; box: { min: P3; max: P3 }; delay: number; cooldown: number; playerDamage: number })[];
   /** Paid links between two spots, e.g. a dumbwaiter: using one end refills the ammo of players at the other. */
   links?: { a: Placed; b: Placed; cost: number }[];
+  /** Items hidden in count of the spots (picked by the seed). Bring them all to drop and every player may take one box weapon there once. */
+  secret?: { spots: (Placed & { name: string })[]; count: number; drop: Placed };
 }
 
 export type WindowDef = MapDef['windows'][number];
@@ -181,11 +183,13 @@ export function validateMap(map: MapDef): string[] {
     ...(map.power ? [['power', map.power] as [string, Placed]] : []),
     ...(map.traps ?? []).map((t) => [`trap ${t.id}`, t] as [string, Placed]),
     ...(map.links ?? []).flatMap((l) => [['link', l.a], ['link', l.b]] as [string, Placed][]),
+    ...(map.secret ? [...map.secret.spots.map((p) => [`secret ${p.name}`, p] as [string, Placed]), ['secret drop', map.secret.drop] as [string, Placed]] : []),
   ];
   for (const [what, p] of placed) {
     checkFloor(p.floor, what);
     if (at(p.floor, p.cell) !== '.') errs.push(`${what}: cell ${p.cell} on ${p.floor} is not floor`);
   }
+  if (map.secret && map.secret.count > map.secret.spots.length) errs.push('secret: more items than hiding spots');
   for (const b of map.boxSpots) if (!zones.has(b.zone)) errs.push(`box spot ${b.cell}: zone ${b.zone} is never opened`);
   if (!map.playerSpawns.length) errs.push('no player spawns');
   return errs;

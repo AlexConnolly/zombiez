@@ -29,6 +29,8 @@ const CLIMB_SPEED = 1;
 const ROOF_WARNING = 3;
 const SLIDE_TIME = 0.6;
 const LINK_RANGE = 2.5;
+/** The shelter shows each weapon on offer for this long; Use takes the one showing. */
+const SHELTER_CYCLE = 1.5;
 /** Lag compensation looks back at most this many ticks (~350 ms: 250 ms ping + 100 ms interpolation). */
 export const MAX_REWIND = 11;
 const BLEED_TIME = 30;
@@ -87,7 +89,8 @@ export type GameEvent =
   | { type: 'boxMove'; spot: number }
   | { type: 'trap'; id: string; fire: boolean }
   | { type: 'slide'; pid: string }
-  | { type: 'link'; pid: string; to: number };
+  | { type: 'link'; pid: string; to: number }
+  | { type: 'secret'; pid: string; placed: number };
 
 export interface Player {
   id: string;
@@ -167,6 +170,8 @@ export interface Game {
   nextId: number;
   /** Per trap: seconds until it can be used again, and seconds until a lit one fires (0 = not lit). */
   traps: Record<string, { cd: number; fuse: number }>;
+  /** The map's secret: hiding spots that still hold an item, items each player carries, items placed, players who took their reward. */
+  secret: { spots: number[]; carried: Record<string, number>; placed: number; claimed: string[] };
 }
 
 export type Interaction =
@@ -181,6 +186,8 @@ export type Interaction =
   | { kind: 'slide'; stair: number; label: string }
   | { kind: 'link'; link: number; label: string; cost: number }
   | { kind: 'melee'; melee: MeleeId; label: string; cost: number }
+  | { kind: 'secret'; spot: number; label: string }
+  | { kind: 'shelter'; weapon: WeaponId | null; label: string }
   | { kind: 'info'; label: string };
 
 const v = (x: number, y: number, z: number): V3 => ({ x, y, z });
@@ -219,8 +226,13 @@ export class Sim {
       projectiles: [],
       nextId: 1,
       traps: Object.fromEntries((map.traps ?? []).map((t) => [t.id, { cd: 0, fuse: 0 }])),
+      secret: { spots: [], carried: {}, placed: 0, claimed: [] },
     };
     this.state = s;
+    if (map.secret) {
+      const pool = map.secret.spots.map((_, i) => i);
+      for (let i = 0; i < map.secret.count; i++) s.secret.spots.push(pool.splice(Math.floor(this.rand() * pool.length), 1)[0]);
+    }
     s.box.moveAt = 4 + Math.floor(this.rand() * 5);
     s.players = playerIds.map((id, i) => ({ ...newPlayer(id), pos: placedPos(map, map.playerSpawns[i % map.playerSpawns.length]) }));
     this.world.update(s.doors, s.box.spot);
@@ -643,6 +655,13 @@ export class Sim {
       add(placedPos(map, l.a), { kind: 'link', link: i, label: 'Send ammo up the dumbwaiter', cost: l.cost });
       add(placedPos(map, l.b), { kind: 'link', link: i, label: 'Send ammo down the dumbwaiter', cost: l.cost });
     });
+    const sec = map.secret;
+    if (sec) {
+      for (const i of s.secret.spots) add(placedPos(map, sec.spots[i]), { kind: 'secret', spot: i, label: 'Pick up a ration book' });
+      const offer = this.shelterOffer(p);
+      const label = this.shelterLabel(p);
+      add(placedPos(map, sec.drop), s.secret.carried[p.id] || offer ? { kind: 'shelter', weapon: offer, label } : { kind: 'info', label });
+    }
     map.stairs.forEach((st, i) => {
       if (!st.slide) return;
       const fi = floorIndex(map, st.floor) + 1;
@@ -725,6 +744,24 @@ export class Sim {
         this.events.push({ type: 'link', pid: p.id, to: it.link });
         return;
       }
+      case 'secret':
+        s.secret.spots = s.secret.spots.filter((i) => i !== it.spot);
+        s.secret.carried[p.id] = (s.secret.carried[p.id] ?? 0) + 1;
+        this.events.push({ type: 'secret', pid: p.id, placed: s.secret.placed });
+        return;
+      case 'shelter': {
+        const carried = s.secret.carried[p.id] ?? 0;
+        if (carried) {
+          s.secret.placed += carried;
+          s.secret.carried[p.id] = 0;
+          this.events.push({ type: 'secret', pid: p.id, placed: s.secret.placed });
+        } else if (it.weapon) {
+          this.give(p, it.weapon);
+          s.secret.claimed.push(p.id);
+          this.events.push({ type: 'buy', pid: p.id, what: it.weapon });
+        }
+        return;
+      }
       case 'slide': {
         const st = this.map.stairs[it.stair];
         const fi = floorIndex(this.map, st.floor);
@@ -741,6 +778,24 @@ export class Sim {
         return;
       }
     }
+  }
+
+  /** Once all the secret items are in, the weapon the shelter is showing this player right now. */
+  private shelterOffer(p: Player): WeaponId | null {
+    const sec = this.state.secret;
+    if (!this.map.secret || sec.placed < this.map.secret.count || sec.claimed.includes(p.id) || sec.carried[p.id]) return null;
+    const pool = (Object.keys(WEAPONS) as WeaponId[]).filter((id) => WEAPONS[id].boxWeight > 0 && id !== 'zapper' && !p.weapons.some((w) => w.id === id));
+    return pool[Math.floor((this.state.tick * TICK) / SHELTER_CYCLE) % pool.length] ?? null;
+  }
+
+  private shelterLabel(p: Player) {
+    const sec = this.state.secret;
+    const n = sec.carried[p.id] ?? 0;
+    const offer = this.shelterOffer(p);
+    if (n) return `Put ${n === 1 ? 'the ration book' : `${n} ration books`} in the shelter`;
+    if (offer) return `Take the ${WEAPONS[offer].name} from the Anderson shelter`;
+    if (sec.claimed.includes(p.id)) return 'The Anderson shelter is empty';
+    return `A locked hatch: ${sec.placed} of ${this.map.secret!.count} ration books`;
   }
 
   private doorAt(fi: number, x: number, z: number) {

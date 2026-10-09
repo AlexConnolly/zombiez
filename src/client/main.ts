@@ -413,6 +413,13 @@ function hudEvents(evs: GameEvent[]) {
     if (e.type === 'roundEnd') banner(`Round ${e.round} survived`);
     if (e.type === 'powerup') banner(PU_NAMES[e.kind]);
     if (e.type === 'power') banner('Power on');
+    if (e.type === 'secret' && sim.map.secret) {
+      const n = sim.map.secret.count;
+      const carried = sim.state.secret.carried[e.pid] ?? 0;
+      if (e.placed >= n) banner('The Anderson shelter is open');
+      else if (e.pid === localId) banner(carried ? `Ration book found (${carried} carried)` : `${e.placed} of ${n} ration books in the vault`);
+    }
+    if (e.type === 'trap' && e.fire) banner('The gas goes up');
     if (e.type === 'gameOver') overTimer = setTimeout(gameOver, 2500);
   }
 }

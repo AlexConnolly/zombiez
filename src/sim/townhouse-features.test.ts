@@ -204,3 +204,58 @@ describe('cricket bat', () => {
     expect(a.melee).toBe('knife');
   });
 });
+
+describe("the Lodger's secret", () => {
+  const sec = map.secret!;
+  const spotsOf = (seed: number) => new Sim(map, seed).state.secret.spots;
+
+  it('hides 3 ration books in different spots, chosen by the seed', () => {
+    expect(spotsOf(5)).toEqual(spotsOf(5));
+    expect(new Set(spotsOf(5)).size).toBe(3);
+    const seen = new Set(Array.from({ length: 20 }, (_, i) => spotsOf(i).join()));
+    expect(seen.size).toBeGreaterThan(5);
+  });
+
+  it('books are picked up with Use and put in the coal vault; then each player takes one box weapon (never the Zapper)', () => {
+    const sim = quiet(['a', 'b']);
+    const [a, b] = sim.state.players;
+    const vault = placedPos(map, sec.drop);
+    for (const i of [...sim.state.secret.spots]) {
+      a.pos = placedPos(map, sec.spots[i]);
+      expect(sim.interaction('a')).toMatchObject({ kind: 'secret', spot: i });
+      press(sim, 'a');
+    }
+    expect(sim.state.secret.spots).toEqual([]);
+    expect(sim.state.secret.carried.a).toBe(3);
+    a.pos = vault;
+    expect(sim.interaction('a')?.label).toMatch(/3 ration books/);
+    press(sim, 'a');
+    expect(sim.state.secret.placed).toBe(3);
+    const offers = new Set<string>();
+    for (let t = 0; t < 30 / TICK; t++) {
+      sim.step({});
+      const it = sim.interaction('a');
+      if (it?.kind === 'shelter' && it.weapon) offers.add(it.weapon);
+    }
+    expect(offers.has('zapper')).toBe(false);
+    expect(offers.size).toBe(5);
+    const it = sim.interaction('a');
+    press(sim, 'a');
+    expect(a.weapons.map((w) => w.id)).toContain(it?.kind === 'shelter' && it.weapon);
+    expect(sim.interaction('a')?.kind).toBe('info');
+    b.pos = vault;
+    expect(sim.interaction('b')).toMatchObject({ kind: 'shelter' });
+  });
+
+  it('the hatch stays shut until every book is in', () => {
+    const sim = quiet();
+    const p = sim.state.players[0];
+    p.pos = placedPos(map, sec.spots[sim.state.secret.spots[0]]);
+    press(sim);
+    p.pos = placedPos(map, sec.drop);
+    press(sim);
+    expect(sim.state.secret.placed).toBe(1);
+    expect(sim.interaction('p1')).toMatchObject({ kind: 'info', label: expect.stringMatching(/1 of 3/) });
+  });
+});
+
