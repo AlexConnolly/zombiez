@@ -43,6 +43,7 @@ export interface Snap {
   /** Map machines (missing from older servers). */
   traps?: Game['traps'];
   secret?: Game['secret'];
+  frozen?: number;
   events: GameEvent[];
 }
 
@@ -74,6 +75,7 @@ export function encodeSnap(s: Game, map: MapDef, ack: number, events: GameEvent[
     projectiles: s.projectiles.map((p) => [p.id, p.weapon, r2(p.pos.x), r2(p.pos.y), r2(p.pos.z)]),
     traps: s.traps,
     secret: s.secret,
+    frozen: s.frozen,
     events,
   };
 }
@@ -102,5 +104,6 @@ export function applySnap(s: Game, map: MapDef, n: Snap) {
   s.powerups = n.powerups.map(([id, k, x, y, z, t]) => ({ id, kind: POWERUPS[k], pos: { x, y, z }, t }));
   if (n.traps) s.traps = n.traps;
   if (n.secret) s.secret = n.secret;
+  s.frozen = n.frozen ?? 0;
   s.projectiles = n.projectiles.map(([id, weapon, x, y, z]) => ({ id, pid: '', weapon, pos: { x, y, z }, vel: { x: 0, y: 0, z: 0 }, t: 0 }));
 }

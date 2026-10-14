@@ -90,7 +90,8 @@ export type GameEvent =
   | { type: 'trap'; id: string; fire: boolean }
   | { type: 'slide'; pid: string }
   | { type: 'link'; pid: string; to: number }
-  | { type: 'secret'; pid: string; placed: number };
+  | { type: 'secret'; pid: string; placed: number }
+  | { type: 'dawn'; pid: string };
 
 export interface Player {
   id: string;
@@ -170,6 +171,8 @@ export interface Game {
   nextId: number;
   /** Per trap: seconds until it can be used again, and seconds until a lit one fires (0 = not lit). */
   traps: Record<string, { cd: number; fuse: number }>;
+  /** Seconds every zombie stays stopped (a bell). */
+  frozen: number;
   /** The map's secret: hiding spots that still hold an item, items each player carries, items placed, players who took their reward. */
   secret: { spots: number[]; carried: Record<string, number>; placed: number; claimed: string[] };
 }
@@ -188,7 +191,15 @@ export type Interaction =
   | { kind: 'melee'; melee: MeleeId; label: string; cost: number }
   | { kind: 'secret'; spot: number; label: string }
   | { kind: 'shelter'; weapon: WeaponId | null; label: string }
+  | { kind: 'dawn'; label: string }
   | { kind: 'info'; label: string };
+
+const TRAP_LABELS = { gas: 'Light the gas', fire: 'Feed the fire', bell: 'Ring the bell' };
+/** The secret's words: what is hidden, where it goes. */
+export const SECRET_WORDS = {
+  shelter: { one: 'ration book', many: 'ration books', drop: 'the vault' },
+  dawn: { one: 'sun medallion', many: 'sun medallions', drop: 'the altar' },
+};
 
 const v = (x: number, y: number, z: number): V3 => ({ x, y, z });
 const copy = (p: V3): V3 => ({ ...p });
@@ -226,6 +237,7 @@ export class Sim {
       projectiles: [],
       nextId: 1,
       traps: Object.fromEntries((map.traps ?? []).map((t) => [t.id, { cd: 0, fuse: 0 }])),
+      frozen: 0,
       secret: { spots: [], carried: {}, placed: 0, claimed: [] },
     };
     this.state = s;
@@ -266,7 +278,8 @@ export class Sim {
       for (const p of s.players) this.updatePlayer(p, cmds[p.id] ?? { ...NO_INPUT, yaw: p.yaw, pitch: p.pitch });
       this.updateRound();
       this.updateFlows();
-      for (const z of [...s.zombies]) this.updateZombie(z);
+      if (s.frozen > 0) s.frozen = Math.max(0, s.frozen - TICK);
+      else for (const z of [...s.zombies]) this.updateZombie(z);
       this.separate();
       this.updateProjectiles();
       this.updatePowerups();
@@ -410,18 +423,19 @@ export class Sim {
     for (let i = 0; i < def.pellets; i++) {
       const dir = this.jitter(d, def.spread);
       const wall = rayWorld(o, dir, 60, this.world.ray());
-      let best = wall;
-      let hitZ: Zombie | null = null;
-      let head = false;
+      const hits: { t: number; z: Zombie; head: boolean }[] = [];
       for (const z of this.state.zombies) {
         const [bodyBox, headBox] = zombieBoxes(this.rewound(z, view));
         const th = rayBox(o, dir, headBox);
         const tb = rayBox(o, dir, bodyBox);
         const t = Math.min(th, tb);
-        if (t < best) { best = t; hitZ = z; head = th <= tb; }
+        if (t < wall) hits.push({ t, z, head: th <= tb });
       }
-      ends.push(v(o.x + dir.x * best, o.y + dir.y * best, o.z + dir.z * best));
-      if (hitZ) this.hurtZombie(hitZ, def.damage * (head ? 2 : 1), p, head ? 'head' : 'body');
+      hits.sort((a, b) => a.t - b.t);
+      const struck = hits.slice(0, def.pierce ?? 1);
+      const end = struck.length === (def.pierce ?? 1) ? struck[struck.length - 1].t : wall;
+      ends.push(v(o.x + dir.x * end, o.y + dir.y * end, o.z + dir.z * end));
+      for (const h of struck) this.hurtZombie(h.z, def.damage * (h.head ? 2 : 1), p, h.head ? 'head' : 'body');
     }
     this.events.push({ type: 'shot', pid: p.id, weapon: w.id, from: o, ends });
   }
@@ -649,7 +663,7 @@ export class Sim {
     if (map.power && !s.power) add(placedPos(map, map.power), { kind: 'power', label: 'Turn on power' });
     for (const t of map.traps ?? []) {
       const ts = s.traps[t.id];
-      add(placedPos(map, t), ts.cd > 0 ? { kind: 'info', label: `Cooling down ${Math.ceil(ts.cd)}s` } : { kind: 'trap', id: t.id, label: 'Light the gas', cost: t.cost });
+      add(placedPos(map, t), ts.cd > 0 ? { kind: 'info', label: `Cooling down ${Math.ceil(ts.cd)}s` } : { kind: 'trap', id: t.id, label: TRAP_LABELS[t.kind ?? 'gas'], cost: t.cost });
     }
     (map.links ?? []).forEach((l, i) => {
       add(placedPos(map, l.a), { kind: 'link', link: i, label: 'Send ammo up the dumbwaiter', cost: l.cost });
@@ -657,10 +671,19 @@ export class Sim {
     });
     const sec = map.secret;
     if (sec) {
-      for (const i of s.secret.spots) add(placedPos(map, sec.spots[i]), { kind: 'secret', spot: i, label: 'Pick up a ration book' });
-      const offer = this.shelterOffer(p);
-      const label = this.shelterLabel(p);
-      add(placedPos(map, sec.drop), s.secret.carried[p.id] || offer ? { kind: 'shelter', weapon: offer, label } : { kind: 'info', label });
+      const words = SECRET_WORDS[sec.reward ?? 'shelter'];
+      for (const i of s.secret.spots) add(placedPos(map, sec.spots[i]), { kind: 'secret', spot: i, label: `Pick up a ${words.one}` });
+      if (sec.reward === 'dawn') {
+        const n = s.secret.carried[p.id] ?? 0;
+        const ready = s.secret.placed >= sec.count && !s.secret.claimed.length;
+        const label = n ? `Put ${n === 1 ? `the ${words.one}` : `${n} ${words.many}`} on the altar` :
+          ready ? 'Call Dawn' : s.secret.claimed.length ? 'The altar is cold' : `An altar: ${s.secret.placed} of ${sec.count} ${words.many}`;
+        add(placedPos(map, sec.drop), n ? { kind: 'shelter', weapon: null, label } : ready ? { kind: 'dawn', label } : { kind: 'info', label });
+      } else {
+        const offer = this.shelterOffer(p);
+        const label = this.shelterLabel(p);
+        add(placedPos(map, sec.drop), s.secret.carried[p.id] || offer ? { kind: 'shelter', weapon: offer, label } : { kind: 'info', label });
+      }
     }
     map.stairs.forEach((st, i) => {
       if (!st.slide) return;
@@ -762,6 +785,17 @@ export class Sim {
         }
         return;
       }
+      case 'dawn': {
+        if (s.secret.claimed.length) return;
+        s.secret.claimed.push(p.id);
+        s.toSpawn = 0;
+        for (const z of [...s.zombies]) {
+          this.removeZombie(z);
+          this.events.push({ type: 'kill', zid: z.id, pos: copy(z.pos), head: false, pid: '' });
+        }
+        this.events.push({ type: 'dawn', pid: p.id });
+        return;
+      }
       case 'slide': {
         const st = this.map.stairs[it.stair];
         const fi = floorIndex(this.map, st.floor);
@@ -812,6 +846,7 @@ export class Sim {
       if (ts.fuse > 1e-9) continue;
       ts.fuse = 0;
       this.events.push({ type: 'trap', id: t.id, fire: true });
+      if (t.kind === 'bell') { s.frozen = t.duration ?? 4; continue; }
       const b = { min: v3(t.box.min), max: v3(t.box.max) };
       for (const z of [...s.zombies]) {
         if (!pointInBox(v(z.pos.x, z.pos.y + 0.5, z.pos.z), b)) continue;

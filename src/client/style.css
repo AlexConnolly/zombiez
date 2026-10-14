@@ -36,7 +36,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .h1 { font-size: 56px; font-weight: 600; margin: 4px 0 28px; }
 .h2 { font-size: 48px; font-weight: 600; line-height: 1.05; }
 .cards { display: flex; gap: 32px; flex-wrap: wrap; }
-.card { width: min(420px, calc((100vw - 208px) / 3)); min-width: 280px; border: 3px solid transparent; border-radius: 8px; background: #0c0c0f; overflow: hidden; }
+.card { width: min(420px, calc((100vw - 240px) / 4)); min-width: 220px; border: 3px solid transparent; border-radius: 8px; background: #0c0c0f; overflow: hidden; }
 .card:focus { border-color: var(--gold); box-shadow: 0 0 30px rgba(232,184,74,.25); outline: none; }
 .card.empty { height: 378px; border: 2px dashed #3d3832; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #5d5850; font-size: 28px; }
 .card.empty .hint { color: #5d5850; font-size: 15px; margin-top: 6px; }

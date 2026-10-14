@@ -15,6 +15,8 @@ export interface FloorDef {
   height?: number;
   wallColor?: string;
   floorColor?: string;
+  /** Open sky: no ceiling over this floor's tiles. */
+  open?: boolean;
 }
 export interface Placed { floor: string; cell: Cell }
 
@@ -57,13 +59,21 @@ export interface MapDef {
   props?: { kind: string; pos: P3; size?: P3; rot?: number; color?: string }[];
   /** Render only: a mansard roof over the top floor, from the eaves up to a flat top at the ridge. */
   roof?: { eaves: number; ridge: number };
-  ambience?: 'country' | 'city';
-  /** Bought machines that, after a delay, kill every zombie inside box and hurt players there. */
-  traps?: (Placed & { id: string; cost: number; box: { min: P3; max: P3 }; delay: number; cooldown: number; playerDamage: number })[];
+  ambience?: 'country' | 'city' | 'forest';
+  /** Robes instead of street clothes. */
+  zombieSkin?: 'robe';
+  /**
+   * Bought machines. After a delay a 'gas' or 'fire' trap kills every zombie inside box and hurts players there;
+   * a 'bell' stops every zombie for duration seconds.
+   */
+  traps?: (Placed & { id: string; kind?: 'gas' | 'fire' | 'bell'; cost: number; box: { min: P3; max: P3 }; delay: number; cooldown: number; playerDamage: number; duration?: number })[];
   /** Paid links between two spots, e.g. a dumbwaiter: using one end refills the ammo of players at the other. */
   links?: { a: Placed; b: Placed; cost: number }[];
-  /** Items hidden in count of the spots (picked by the seed). Bring them all to drop and every player may take one box weapon there once. */
-  secret?: { spots: (Placed & { name: string })[]; count: number; drop: Placed };
+  /**
+   * Items hidden in count of the spots (picked by the seed). Bring them all to drop, then:
+   * shelter: every player may take one box weapon there once. dawn: once per game, any player may kill every zombie and end the round.
+   */
+  secret?: { spots: (Placed & { name: string })[]; count: number; drop: Placed; reward?: 'shelter' | 'dawn' };
 }
 
 export type WindowDef = MapDef['windows'][number];
@@ -118,6 +128,8 @@ export function windowGeom(map: MapDef, w: WindowDef) {
 }
 
 const WALKABLE = new Set(['.', 'D', 'S']);
+/** A split-rail fence: nobody walks through it, but shots pass over its top. */
+export const FENCE_H = 1.2;
 /** Tiles that leave a hole for the stairs below. 'R' is a hole edged with a railing. */
 const HOLE = new Set([' ', 'R']);
 export const isWalkTile = (t: string) => WALKABLE.has(t);

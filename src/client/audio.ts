@@ -18,6 +18,8 @@ export class Sound {
   private traffic: GainNode | null = null;
   private sirenT = 30;
   private foxT = 15;
+  private owlT = 12;
+  private chirpT = 0;
   private alarm: { at: V3; t: number; beep: number } | null = null;
   volume = 0.8;
 
@@ -145,6 +147,11 @@ export class Sound {
       case 'bucket':
         this.tone(160, 0.18, 'sine', { at, gain: 0.8, to: 60 });
         this.hiss(0.12, 'lowpass', 900, { at, gain: 0.5 });
+        break;
+      case 'crossbow':
+        // A string snap and a soft thud: no bang.
+        this.tone(320 * r, 0.12, 'triangle', { at, gain: 0.35, to: 90 });
+        this.hiss(0.06, 'bandpass', 1800, { at, gain: 0.25, q: 3 });
         break;
       case 'zapper':
         this.tone(1400 * r, 0.25, 'square', { at, gain: 0.18, to: 180 });
@@ -283,8 +290,14 @@ export class Sound {
           for (const [f, d] of [[523, 0], [784, 0.1]] as const) this.tone(f, 0.5, 'triangle', { gain: 0.2, delay: d });
           break;
         case 'trap':
-          if (!e.fire) { this.tone(1800, 0.05, 'square', { gain: 0.2 }); this.hiss(1, 'highpass', 2500, { gain: 0.5, attack: 0.1 }); }
+          if (sim.map.traps?.find((t) => t.id === e.id)?.kind === 'bell') {
+            // A big iron bell: a low strike and slow-fading partials.
+            if (e.fire) for (const [f, g] of [[196, 0.5], [392, 0.3], [470, 0.18], [784, 0.1]] as const) this.tone(f, 4, 'sine', { gain: g, attack: 0.005 });
+          } else if (!e.fire) { this.tone(1800, 0.05, 'square', { gain: 0.2 }); this.hiss(1, 'highpass', 2500, { gain: 0.5, attack: 0.1 }); }
           else { this.hiss(1.8, 'lowpass', 1200, { gain: 1.8, to: 90, attack: 0.02 }); this.tone(50, 1.2, 'sine', { gain: 1.4, to: 28 }); }
+          break;
+        case 'dawn':
+          for (const [f, d] of [[262, 0], [330, 0.3], [392, 0.6], [523, 0.9]] as const) this.tone(f, 3, 'sine', { gain: 0.25, delay: d, attack: 0.4 });
           break;
         case 'slide':
           if (e.pid === localId) this.hiss(0.6, 'bandpass', 900, { gain: 0.6, to: 2400, q: 1.5, attack: 0.05 });
@@ -368,6 +381,7 @@ export class Sound {
       }
     }
     if (sim.map.ambience === 'city') this.city(dt);
+    else if (sim.map.ambience === 'forest') this.forest(dt);
     else {
       this.thunderT -= dt;
       if (this.thunderT <= 0) {
@@ -376,6 +390,22 @@ export class Sound {
       }
     }
     this.traffic?.gain.setTargetAtTime(sim.map.ambience === 'city' ? 0.07 : 0, now, 1);
+  }
+
+  /** A pine forest at night: crickets and an owl, no storm. */
+  private forest(dt: number) {
+    this.chirpT -= dt;
+    if (this.chirpT <= 0) {
+      this.chirpT = 0.6 + Math.random() * 1.4;
+      for (let i = 0; i < 3; i++) this.tone(4200 + Math.random() * 300, 0.03, 'sine', { gain: 0.04, delay: i * 0.06 });
+    }
+    this.owlT -= dt;
+    if (this.owlT <= 0) {
+      this.owlT = 20 + Math.random() * 30;
+      const at = { x: -20 + Math.random() * 90, y: 8, z: -20 + Math.random() * 90 };
+      this.tone(390, 0.35, 'sine', { gain: 0.25, to: 360, at, attack: 0.05 });
+      this.tone(370, 0.6, 'sine', { gain: 0.25, to: 330, at, attack: 0.05, delay: 0.5 });
+    }
   }
 
   /** London at night: traffic rumble, a far siren now and then, foxes, and car alarms. */

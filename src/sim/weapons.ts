@@ -1,4 +1,4 @@
-export type WeaponId = 'p9' | 'ripper' | 'barnburner' | 'longshot' | 'thumper' | 'bucket' | 'zapper';
+export type WeaponId = 'p9' | 'ripper' | 'barnburner' | 'longshot' | 'thumper' | 'bucket' | 'zapper' | 'crossbow';
 
 export interface WeaponDef {
   name: string;
@@ -16,6 +16,8 @@ export interface WeaponDef {
   /** Projectile weapons explode with this radius in metres; 0 = hitscan. */
   splash: number;
   boxWeight: number;
+  /** Hitscan only: how many zombies one shot goes through; defaults to 1. */
+  pierce?: number;
 }
 
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
@@ -25,6 +27,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   longshot: { name: 'Longshot', damage: 200, pellets: 1, spread: 0, mag: 5, reserve: 50, rate: 0.9, auto: false, reload: 2.8, cost: 500, splash: 0, boxWeight: 1 },
   thumper: { name: 'Thumper', damage: 60, pellets: 1, spread: 0.025, mag: 30, reserve: 240, rate: 10, auto: true, reload: 2.6, cost: 0, splash: 0, boxWeight: 1.5 },
   bucket: { name: 'Bucket', damage: 400, pellets: 1, spread: 0, mag: 1, reserve: 24, rate: 1, auto: false, reload: 2.5, cost: 0, splash: 3.5, boxWeight: 1 },
+  crossbow: { name: 'Hunting Crossbow', damage: 600, pellets: 1, spread: 0, mag: 1, reserve: 30, rate: 1, auto: false, reload: 1.3, cost: 1500, splash: 0, boxWeight: 0, pierce: 3 },
   zapper: { name: 'Zapper', damage: 1000, pellets: 1, spread: 0, mag: 3, reserve: 27, rate: 3, auto: false, reload: 2.5, cost: 0, splash: 2.5, boxWeight: 0.4 },
 };
 

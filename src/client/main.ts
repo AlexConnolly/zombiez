@@ -1,5 +1,5 @@
 import { BLURBS, MAPS, mapById } from '../maps';
-import { NO_INPUT, Sim, TICK, type Command, type GameEvent } from '../sim/game';
+import { NO_INPUT, SECRET_WORDS, Sim, TICK, type Command, type GameEvent } from '../sim/game';
 import { WEAPONS } from '../sim/weapons';
 import { NetClient } from '../net/client';
 import type { ServerMsg } from '../net/protocol';
@@ -463,11 +463,17 @@ function hudEvents(evs: GameEvent[]) {
     if (e.type === 'power') banner('Power on');
     if (e.type === 'secret' && sim.map.secret) {
       const n = sim.map.secret.count;
+      const dawn = sim.map.secret.reward === 'dawn';
+      const w = SECRET_WORDS[dawn ? 'dawn' : 'shelter'];
       const carried = sim.state.secret.carried[e.pid] ?? 0;
-      if (e.placed >= n) banner('The Anderson shelter is open');
-      else if (e.pid === localId) banner(carried ? `Ration book found (${carried} carried)` : `${e.placed} of ${n} ration books in the vault`);
+      if (e.placed >= n) banner(dawn ? 'The altar is lit: Dawn is ready' : 'The Anderson shelter is open');
+      else if (e.pid === localId) banner(carried ? `${w.one[0].toUpperCase()}${w.one.slice(1)} found (${carried} carried)` : `${e.placed} of ${n} ${w.many} on ${w.drop}`);
     }
-    if (e.type === 'trap' && e.fire) banner('The gas goes up');
+    if (e.type === 'trap' && e.fire) {
+      const kind = sim.map.traps?.find((t) => t.id === e.id)?.kind ?? 'gas';
+      banner(kind === 'bell' ? 'They kneel' : kind === 'fire' ? 'The fire roars' : 'The gas goes up');
+    }
+    if (e.type === 'dawn') banner('Dawn breaks');
     if (e.type === 'gameOver') overTimer = setTimeout(gameOver, 2500);
   }
 }

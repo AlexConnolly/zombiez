@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { EYE, type GameEvent, type PowerupKind, type Sim, type Zombie } from '../sim/game';
-import { DIRS, facingDir, floorHeight, floorIndex, maxBoards, placedPos, windowGeom, windowOpening, type MapDef, type V3 } from '../sim/map';
+import { DIRS, FENCE_H, facingDir, floorHeight, floorIndex, maxBoards, placedPos, windowGeom, windowOpening, type MapDef, type V3 } from '../sim/map';
 import { MELEE, WEAPONS, isMelee, type MeleeId, type WeaponId } from '../sim/weapons';
 
 const C = {
@@ -65,10 +65,12 @@ const GUN_PATHS: Record<WeaponId, string> = {
   thumper: 'M4 10h100v14H76l-6 26H58l2-26H44l-4 18H30l2-18H4z',
   bucket: 'M14 6h92v24H72l-6 20H52l4-20H14z',
   zapper: 'M20 6h70l20 12-20 12H72l-6 20H54l4-20H20z',
+  crossbow: 'M10 22h80v8H64l-8 18H44l6-18H10z M80 4h6v44h-6z',
 };
 const MELEE_PATHS: Record<MeleeId, string> = { knife: 'M10 25h60l10-5v10l-10-5', cricketBat: 'M4 20h40l70-6v22l-70-6H4z' };
 
-const GUNS: Record<WeaponId, { len: number; h: number; w: number; color: number; mag?: number; stock?: boolean; scope?: boolean; glow?: boolean }> = {
+const GUNS: Record<WeaponId, { len: number; h: number; w: number; color: number; mag?: number; stock?: boolean; scope?: boolean; glow?: boolean; bow?: boolean }> = {
+  crossbow: { len: 0.6, h: 0.06, w: 0.05, color: 0x3a2a1c, stock: true, bow: true },
   p9: { len: 0.22, h: 0.06, w: 0.04, color: 0x2b2d31 },
   ripper: { len: 0.42, h: 0.08, w: 0.05, color: 0x26282b, mag: 0.16 },
   barnburner: { len: 0.72, h: 0.07, w: 0.05, color: 0x2b2d31, stock: true },
@@ -87,6 +89,11 @@ function gunModel(id: WeaponId) {
   if (g.mag) grp.add(boxMesh(g.w * 0.8, g.mag, 0.05, lam(0x1b1c1f), 0, -g.mag / 2, -g.len * 0.45));
   if (g.stock) grp.add(boxMesh(g.w, g.h * 1.4, 0.22, lam(C.wood), 0, -0.02, 0.1));
   if (g.scope) grp.add(boxMesh(0.035, 0.035, 0.22, lam(0x111111), 0, g.h / 2 + 0.03, -g.len * 0.45));
+  if (g.bow) {
+    // Limbs across the front, a string back to the bolt, the bolt itself.
+    grp.add(boxMesh(0.6, 0.03, 0.04, lam(0x1b1c1f), 0, 0.02, -g.len + 0.06));
+    grp.add(boxMesh(0.012, 0.012, 0.45, lam(0xc8c0a8), 0, 0.045, -g.len + 0.2));
+  }
   if (g.glow) grp.add(boxMesh(g.w * 1.05, 0.03, g.len * 0.8, new THREE.MeshBasicMaterial({ color: C.power }), 0, 0.02, -g.len / 2));
   grp.add(boxMesh(0.07, 0.09, 0.12, lam(0x3a2b22), 0, -0.1, 0.0)); // hand
   grp.userData.tip = new THREE.Vector3(0, 0.01, -g.len - 0.02);
@@ -171,6 +178,7 @@ export class Renderer {
   /** Where the menu camera circles. */
   private center = new THREE.Vector3(7, 1.5, 8);
   private trapFx = new Map<string, THREE.PointLight>();
+  private fires = new Set<string>();
   private books: THREE.Mesh[] = [];
   private hatch = new THREE.Group();
   private recoil = 0;
@@ -261,7 +269,7 @@ export class Renderer {
       x0 = Math.min(x0, x); x1 = Math.max(x1, x + 1); z0 = Math.min(z0, z); z1 = Math.max(z1, z + 1);
     }));
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-    const n = 3500;
+    const n = map.ambience === 'forest' ? 0 : 3500;
     const pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
       let x = 0, z = 0;
@@ -314,6 +322,47 @@ export class Renderer {
         light.position.set(0, 4.8, 0.9);
         grp.add(light);
       }
+      if (p.kind === 'pine') {
+        const pine = lamC(0x111a13);
+        grp.add(boxMesh(0.35, h * 0.3, 0.35, lamC(0x1e150e), 0, h * 0.15, 0));
+        for (let i = 0; i < 3; i++) {
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(w * (1 - i * 0.25), h * 0.4, 7), pine);
+          cone.position.y = h * (0.35 + i * 0.22);
+          grp.add(cone);
+        }
+      }
+      if (p.kind === 'tent') {
+        // An A-frame, open at the front (+z).
+        const cloth = lamC(col || 0x5e5e44);
+        const slope = Math.hypot(w / 2, h);
+        for (const side of [-1, 1]) grp.add(boxMesh(0.04, slope, d, cloth, (side * w) / 4, h / 2, 0).rotateZ(side * Math.atan2(w / 2, h)));
+        grp.add(boxMesh(w * 0.9, 0.05, d * 0.8, lamC(0x3a4a5a), 0, 0.03, 0));
+      }
+      if (p.kind === 'roof') {
+        // A gable over a building of w by d, eaves at the prop's y, rising h; the ridge runs along the longer side.
+        const tile = lamC(col || 0x2a2622);
+        const long = w >= d, span = long ? d : w, run = long ? w : d;
+        const half = span / 2 + 0.3;
+        const slope = Math.hypot(half, h);
+        const tilt = Math.atan2(h, half);
+        for (const side of [-1, 1]) {
+          const m = new THREE.Mesh(UNIT, tile);
+          m.position.y = h / 2;
+          if (long) { m.scale.set(run + 0.6, 0.12, slope); m.position.z = (side * half) / 2; m.rotation.x = side * tilt; }
+          else { m.scale.set(slope, 0.12, run + 0.6); m.position.x = (side * half) / 2; m.rotation.z = -side * tilt; }
+          grp.add(m);
+        }
+      }
+      if (p.kind === 'minibus') {
+        grp.add(boxMesh(2.2, 2.2, 6, lamC(col || 0xc8c4b8), 0, 1.4, 0), boxMesh(2.1, 0.7, 0.05, basic(0x0a0c10), 0, 2, -3.01));
+        for (const [x, z] of [[-1, 2], [1, 2], [-1, -2], [1, -2]]) grp.add(boxMesh(0.25, 0.7, 0.7, lamC(0x0c0c0c), x, 0.35, z));
+        for (const x of [-0.75, 0.75]) grp.add(boxMesh(0.3, 0.2, 0.05, basic(0xfff6e0), x, 0.9, -3.01));
+        const beam = new THREE.SpotLight(0xf4f0ff, 40, 30, 0.45, 0.5, 1.2);
+        beam.position.set(0, 0.9, -3.1);
+        beam.target.position.set(0, 0, -20);
+        grp.add(beam, beam.target);
+      }
+      if (p.kind === 'totem') grp.add(boxMesh(0.8, h, 0.8, lamC(0x5a4028), 0, h / 2, 0), boxMesh(1.6, 1.6, 0.3, lamC(0xb8902a), 0, h + 0.8, 0));
       if (p.kind === 'bin') grp.add(boxMesh(0.6, 1.05, 0.7, lamC(col || 0x1c1e22), 0, 0.53, 0), boxMesh(0.64, 0.06, 0.74, lamC(0x101010), 0, 1.08, 0));
       if (p.kind === 'railing') {
         // Black iron railings: a top bar and posts every 15 cm along the long side.
@@ -399,27 +448,28 @@ export class Renderer {
     if (map.ground) this.townscape(map);
     else this.countryside();
     this.makeRain(map);
-    // The city is lit by orange sodium lamps through a thinner haze; the country by the moon.
-    const city = map.ambience === 'city';
-    (this.scene.fog as THREE.FogExp2).color.setHex(city ? 0x2a221c : C.fog);
-    (this.scene.fog as THREE.FogExp2).density = city ? 0.028 : 0.05;
-    (this.scene.background as THREE.Color).setHex(city ? 0x16110d : C.fogDeep);
+    // The city is lit by orange sodium lamps through a thinner haze; the country by the moon; the forest clearing by a fire under a clear sky.
+    const city = map.ambience === 'city', forest = map.ambience === 'forest';
+    (this.scene.fog as THREE.FogExp2).color.setHex(city ? 0x2a221c : forest ? 0x0d141a : C.fog);
+    (this.scene.fog as THREE.FogExp2).density = city ? 0.028 : forest ? 0.022 : 0.05;
+    (this.scene.background as THREE.Color).setHex(city ? 0x16110d : forest ? 0x070b10 : C.fogDeep);
     this.sky.color.setHex(city ? 0x8a6a4a : 0x5a6a88);
-    this.sky.intensity = city ? 0.9 : 1.1;
-    this.moon.intensity = city ? 0.5 : 1.2;
+    this.sky.intensity = city ? 0.9 : forest ? 1.5 : 1.1;
+    this.moon.intensity = city ? 0.5 : forest ? 1.8 : 1.2;
     const fl = map.floors;
     const w = Math.max(...fl.map((f) => f.tiles[0].length)), d = Math.max(...fl.map((f) => f.tiles.length));
     this.center.set(w / 2, (fl[0].y + fl[fl.length - 1].y) / 2 + 1.5, d / 2);
 
     // Static boxes: one instanced mesh, colour per kind, slight variation so flat walls read as surfaces.
     // Waist-high rails are drawn as bars and posts below; everything else is one instanced mesh.
-    const low = (r: (typeof sim.world.renderBoxes)[number]) => r.kind === 'rail' && r.box.max.y - r.box.min.y <= 1.01;
+    const low = (r: (typeof sim.world.renderBoxes)[number]) => r.kind === 'rail' && r.box.max.y - r.box.min.y <= FENCE_H + 0.01;
     const rb = sim.world.renderBoxes.filter((r) => !low(r));
     const wood = lamC(0x3a2414);
     for (const { box: b } of sim.world.renderBoxes.filter(low)) {
       const long = b.max.x - b.min.x > b.max.z - b.min.z;
       const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
       this.level.add(boxMesh(long ? 1 : 0.1, 0.08, long ? 0.1 : 1, wood, cx, b.max.y - 0.04, cz));
+      if (b.max.y - b.min.y > 1.1) this.level.add(boxMesh(long ? 1 : 0.1, 0.08, long ? 0.1 : 1, wood, cx, b.min.y + 0.55, cz));
       for (const o of [-0.375, -0.125, 0.125, 0.375]) this.level.add(boxMesh(0.04, 0.95, 0.04, wood, cx + (long ? o : 0), b.min.y + 0.475, cz + (long ? 0 : o)));
     }
     // Maps with their own wall colours get an outside skin of brick, so the colours only show indoors.
@@ -579,13 +629,33 @@ export class Renderer {
     }
 
     this.trapFx.clear();
+    this.fires.clear();
     for (const t of map.traps ?? []) {
       const p = placedPos(map, t);
-      // A cast-iron range with four burners.
-      this.level.add(boxMesh(0.9, 0.9, 0.7, lamC(0x1c1d20), p.x, p.y + 0.45, p.z - 0.1));
-      for (const [bx, bz] of [[-0.2, -0.25], [0.2, -0.25], [-0.2, 0.05], [0.2, 0.05]]) this.level.add(boxMesh(0.22, 0.03, 0.22, lamC(0x3a3a3e), p.x + bx, p.y + 0.915, p.z + bz));
       const light = new THREE.PointLight(0x4a8cff, 0, 14, 1.5);
       light.position.set(p.x, p.y + 1.3, p.z);
+      if (t.kind === 'fire') {
+        // The bonfire sits in the middle of the trap box: stones round a bed of embers. The paraffin can is at the use spot.
+        const c = { x: (t.box.min[0] + t.box.max[0]) / 2, y: p.y, z: (t.box.min[2] + t.box.max[2]) / 2 };
+        for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; this.level.add(boxMesh(0.35, 0.3, 0.35, lamC(0x55524c), c.x + Math.cos(a) * 1.3, c.y + 0.15, c.z + Math.sin(a) * 1.3)); }
+        this.level.add(boxMesh(1.8, 0.12, 1.8, basic(0xff5a1a), c.x, c.y + 0.06, c.z), boxMesh(1.6, 0.25, 0.3, lamC(0x1e1612), c.x, c.y + 0.2, c.z), boxMesh(0.3, 0.3, 1.6, lamC(0x2a1a10), c.x, c.y + 0.25, c.z));
+        this.level.add(boxMesh(0.3, 0.45, 0.2, lamC(0x8a2a1a), p.x, p.y + 0.22, p.z));
+        light.color.setHex(0xff7a2a);
+        light.position.set(c.x, c.y + 1, c.z);
+        light.distance = 26;
+        this.fires.add(t.id);
+      } else if (t.kind === 'bell') {
+        // The bell hangs in the tower above; its rope comes down to the use spot.
+        this.level.add(boxMesh(0.03, 5, 0.03, lamC(0x8a7a5a), p.x, p.y + 3.5, p.z));
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 0.8, 10), lamC(0x8a6a2a));
+        bell.position.set(p.x, p.y + 6.4, p.z);
+        this.level.add(bell);
+        light.color.setHex(0xe8b84a);
+      } else {
+        // A cast-iron range with four burners.
+        this.level.add(boxMesh(0.9, 0.9, 0.7, lamC(0x1c1d20), p.x, p.y + 0.45, p.z - 0.1));
+        for (const [bx, bz] of [[-0.2, -0.25], [0.2, -0.25], [-0.2, 0.05], [0.2, 0.05]]) this.level.add(boxMesh(0.22, 0.03, 0.22, lamC(0x3a3a3e), p.x + bx, p.y + 0.915, p.z + bz));
+      }
       this.trapFx.set(t.id, light);
       this.level.add(light);
     }
@@ -599,10 +669,12 @@ export class Renderer {
     this.hatch = new THREE.Group();
     if (map.secret) {
       // Ration books: small buff booklets, faintly lit so a careful player spots them.
-      const bookMat = new THREE.MeshLambertMaterial({ color: 0xc8b27a, emissive: 0x3a3018 });
+      const medal = map.secret.reward === 'dawn';
+      const bookMat = new THREE.MeshLambertMaterial({ color: medal ? 0xd8a838 : 0xc8b27a, emissive: medal ? 0x5a4010 : 0x3a3018 });
       this.books = map.secret.spots.map((sp) => {
         const p = placedPos(map, sp);
-        const b = boxMesh(0.16, 0.03, 0.22, bookMat, p.x, p.y + 0.8, p.z);
+        const b = medal ? new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.03, 16), bookMat) : boxMesh(0.16, 0.03, 0.22, bookMat);
+        b.position.set(p.x, p.y + 0.8, p.z);
         b.rotation.y = p.x * 1.3;
         this.level.add(b);
         return b;
@@ -654,8 +726,9 @@ export class Renderer {
   private zombieMesh(z: Zombie): ZMesh {
     const v = z.id % 3;
     const skin = lamC(C.skin[v]);
-    const shirt = lamC(C.shirt[(z.id >> 2) % 3]);
-    const pants = lamC(C.pants);
+    const robe = this.sim.map.zombieSkin === 'robe';
+    const shirt = lamC(robe ? [0xcfc8b4, 0xbdb6a0, 0xd8d2c0][(z.id >> 2) % 3] : C.shirt[(z.id >> 2) % 3]);
+    const pants = lamC(robe ? 0xa8a18e : C.pants);
     const root = new THREE.Group();
     const body = new THREE.Group();
     root.add(body);
@@ -799,7 +872,8 @@ export class Renderer {
           const t = this.sim.map.traps?.find((x) => x.id === e.id);
           const light = this.trapFx.get(e.id);
           if (!t || !light) break;
-          if (!e.fire) { light.color.setHex(0x4a8cff); light.intensity = 6; break; }
+          if (t.kind === 'bell') { if (e.fire) { light.intensity = 30; this.shake = Math.max(this.shake, 0.3); } break; }
+          if (!e.fire) { light.color.setHex(t.kind === 'fire' ? 0xffb040 : 0x4a8cff); light.intensity = 6; break; }
           // The gas goes up: fire through the whole trap box.
           light.color.setHex(0xff7a20);
           light.intensity = 60;
@@ -811,6 +885,9 @@ export class Renderer {
           this.shake = Math.max(this.shake, 0.6);
           break;
         }
+        case 'dawn':
+          this.flash({ x: this.camera.position.x, y: this.camera.position.y + 20, z: this.camera.position.z }, 0xfff0c0, 40, 2);
+          break;
         case 'power':
           this.lever.rotation.set(this.lever.rotation.x ? -0.6 : 0, 0, this.lever.rotation.z ? -0.6 : 0);
           break;
@@ -846,10 +923,16 @@ export class Renderer {
     if (lid && this.sim.map.secret) lid.rotation.x = s.secret.placed >= this.sim.map.secret.count ? -1.8 : 0;
     for (const [id, l] of this.trapFx) {
       const ts = s.traps[id];
-      if (ts?.fuse > 0) l.intensity = 6 + Math.random() * 3;
-      else l.intensity = Math.max(0, l.intensity - dt * 40);
+      // A bonfire never goes out: it flickers between flares.
+      const fire = this.fires.has(id);
+      const rest = fire ? 30 * (0.8 + 0.2 * Math.sin(this.time * 11) * Math.sin(this.time * 6.7)) : 0;
+      if (ts?.fuse > 0) l.intensity = Math.max(rest, 6 + Math.random() * 3);
+      else l.intensity = Math.max(rest, l.intensity - dt * 40);
+      if (fire && l.intensity <= rest) l.color.setHex(0xff7a2a);
     }
-    this.lamps.forEach((l, i) => (l.intensity = i === 1 ? 9 * (0.75 + 0.25 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3)) : 9));
+    // In the forest the lamps are festoon bulbs on the generator: dark until the power is on.
+    const lampOn = this.sim.map.ambience !== 'forest' || s.power;
+    this.lamps.forEach((l, i) => (l.intensity = !lampOn ? 0 : i === 1 ? 9 * (0.75 + 0.25 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3)) : 9));
 
     // Zombies.
     const seen = new Set<number>();
@@ -861,6 +944,9 @@ export class Renderer {
       m.root.position.set(lerp(p.x, z.pos.x), lerp(p.y, z.pos.y), lerp(p.z, z.pos.z));
       m.root.rotation.y = lerpAngle(p.yaw, z.yaw);
       this.animateZombie(m, z, dt);
+      // A bell has rung: on their knees, heads bowed.
+      if (s.frozen > 0) { m.body.position.y = -0.45; m.body.rotation.x = 0.35; m.legs[0].rotation.x = m.legs[1].rotation.x = -1.4; }
+      else m.body.position.y = 0;
     }
     for (const [id, m] of this.zombies) if (!seen.has(id)) { m.root.removeFromParent(); this.zombies.delete(id); }
     for (const d of [...this.dying]) {

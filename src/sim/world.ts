@@ -1,4 +1,4 @@
-import { DIRS, cellCenter, floorHeight, floorIndex, isWalkTile, stairExits, tile, windowOpening, type Cell, type Dir, type MapDef, type V3 } from './map';
+import { DIRS, FENCE_H, cellCenter, floorHeight, floorIndex, isWalkTile, stairExits, tile, windowOpening, type Cell, type Dir, type MapDef, type V3 } from './map';
 import { SolidIndex, box, type Box } from './physics';
 
 const SLAB = 0.2;
@@ -113,10 +113,19 @@ export class World {
               this.renderBoxes.push({ box: b, kind: 'wall', fi });
             }
           }
-          if (t === '.' || t === 'D') vis(box(x, Y - SLAB, z, x + 1, Y, z + 1), 'floor');
+          if (t === '.' || t === 'D' || t === 'F') vis(box(x, Y - SLAB, z, x + 1, Y, z + 1), 'floor');
+          if (t === 'F') {
+            body.push(box(x, Y, z, x + 1, Y + H, z + 1));
+            ray.push(box(x, Y, z, x + 1, Y + FENCE_H, z + 1));
+            // Drawn as rails along the line the fence runs; a corner or a lone post gets both.
+            const along = (dx: number, dz: number) => tile(map, fi, x + dx, z + dz) === 'F' || tile(map, fi, x - dx, z - dz) === 'F';
+            const ew = along(1, 0), ns = along(0, 1);
+            if (ew || !ns) this.renderBoxes.push({ box: box(x, Y, z + 0.45, x + 1, Y + FENCE_H, z + 0.55), kind: 'rail', fi });
+            if (ns || !ew) this.renderBoxes.push({ box: box(x + 0.45, Y, z, x + 0.55, Y + FENCE_H, z + 1), kind: 'rail', fi });
+          }
           const holeOverStairs = (t === ' ' || t === 'R') && tile(map, fi - 1, x, z) === 'S';
           const interior = t !== ' ' || holeOverStairs;
-          if (interior && t !== 'S' && !skylights.has(this.node(fi, x, z)) && (!above || tile(map, fi + 1, x, z) === ' '))
+          if (interior && !f.open && t !== 'S' && !skylights.has(this.node(fi, x, z)) && (!above || tile(map, fi + 1, x, z) === ' '))
             vis(box(x, Y + H - SLAB, z, x + 1, Y + H, z + 1), 'roof');
         }),
       );
