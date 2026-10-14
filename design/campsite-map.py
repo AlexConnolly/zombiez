@@ -77,13 +77,13 @@ fill(44, 1, 48, 8, '.', top)
 fill(44, 2, 45, 7, 'R', top)
 
 traps = [
-    {'id': 'bonfire', 'kind': 'fire', 'floor': 'ground', 'cell': [27, 30], 'cost': 1000, 'box': {'min': [19, -1, 21], 'max': [31, 3, 33]}, 'delay': 1, 'cooldown': 60, 'playerDamage': 50},
+    {'id': 'bonfire', 'kind': 'fire', 'floor': 'ground', 'cell': [28, 31], 'cost': 1000, 'box': {'min': [19, -1, 21], 'max': [31, 3, 33]}, 'delay': 1, 'cooldown': 60, 'playerDamage': 50},
     {'id': 'bell', 'kind': 'bell', 'floor': 'ground', 'cell': [8, 19], 'cost': 750, 'box': {'min': [0, 0, 0], 'max': [0, 0, 0]}, 'delay': 0.2, 'cooldown': 90, 'playerDamage': 0, 'duration': 4},
 ]
 
 P = lambda x, z, **k: {'floor': 'ground', 'cell': [x, z], **k}
 secret_spots = [
-    P(20, 33, name='tent'), P(25, 19, name='totem'), P(33, 2, name='pantry'), P(10, 23, name='pulpit'),
+    P(20, 33, name='tent'), P(24, 19, name='totem'), P(33, 2, name='pantry'), P(10, 23, name='pulpit'),
     P(43, 21, name='cabin bunk'), P(46, 15, name='boathouse'), P(41, 9, name='generator'), P(41, 3, name="Leader's desk"),
 ]
 
@@ -110,15 +110,15 @@ props += [
     {'kind': 'totem', 'pos': [25.5, 0, 19.5], 'size': [1, 3.6, 1]},
     {'kind': 'roof', 'pos': [26, GROUND_H, 5.5], 'size': [20, 2.2, 11]},
     {'kind': 'roof', 'pos': [8.5, GROUND_H, 23.5], 'size': [9, 3, 13], 'color': '#2e2a26'},
-    {'kind': 'box', 'pos': [8.5, 0, 16.5], 'size': [4, 9, 3], 'color': '#4e3c2c'},  # bell tower over the chapel
-    {'kind': 'roof', 'pos': [8.5, 9, 16.5], 'size': [4, 2.4, 3]},
+    {'kind': 'box', 'pos': [8.5, 0, 16], 'size': [4, 9, 3], 'color': '#4e3c2c'},  # bell tower, overlapping the chapel's north wall
+    {'kind': 'roof', 'pos': [8.5, 9, 16], 'size': [4, 2.4, 3]},
     *[{'kind': 'roof', 'pos': [42.5, GROUND_H, z0 + 2.5], 'size': [7, 1.4, 5]} for z0 in (19, 27, 35)],
     {'kind': 'roof', 'pos': [46.5, GROUND_H, 14.5], 'size': [5, 1.2, 5], 'color': '#33302a'},
     {'kind': 'roof', 'pos': [40, GROUND_H, 5], 'size': [6, 1.4, 6]},
     {'kind': 'roof', 'pos': [46.5, TOWER_Y + 3.4, 5], 'size': [7, 1.2, 10]},
     *[{'kind': 'box', 'pos': [x, TOWER_Y, z], 'size': [0.25, 3.4, 0.25], 'color': '#3a281a'} for x in (43.2, 49.8) for z in (0.2, 9.8)],
     {'kind': 'minibus', 'pos': [23.5, 0, 52], 'color': '#c8c4b8'},
-    *[{'kind': 'box', 'pos': [32, 0.3 * i, 41.8], 'size': [2.6, 0.3, 1.1], 'color': '#5a3e28'} for i in range(4)],  # woodpile
+    *[{'kind': 'box', 'pos': [29.3, 0.3 * i, 41.9], 'size': [2.2, 0.3, 1.1], 'color': '#5a3e28'} for i in range(4)],  # woodpile
     {'kind': 'box', 'pos': [56, -0.2, 25.5], 'size': [12, 0.4, 2], 'color': '#5a4630'},  # jetty
     {'kind': 'box', 'pos': [58, -0.15, 22], 'size': [3.5, 0.4, 1], 'color': '#6a3a2a'},  # rowing boat
     # Tables set for a meal that never finished.
@@ -126,10 +126,10 @@ props += [
     *[{'kind': 'box', 'pos': [x, 0.8, z + dz], 'size': [0.36, 0.06, 0.36], 'color': '#d8d4c8'} for z in (4, 7) for dz in (-0.3, 0.3) for x in range(18, 28, 2)],
     {'kind': 'box', 'pos': [31, 0, 1.5], 'size': [4.5, 0.95, 0.9], 'color': '#3a3a3a'},  # stove
     *[{'kind': 'box', 'pos': [8.5, 0, z], 'size': [5, 0.5, 0.5], 'color': '#4a3322'} for z in (21, 24, 27)],  # pews
-    {'kind': 'box', 'pos': [42.5, 0, 9], 'size': [3, 2.2, 1.6], 'color': '#3e3a34'},  # generator shed
+    {'kind': 'box', 'pos': [39.5, 0, 9.3], 'size': [2.6, 2.2, 1.2], 'color': '#3e3a34'},  # generator shed
 ]
 for x0, z0, x1, z1 in [(17, 1, 34, 9), (5, 18, 11, 28), (38, 3, 41, 6), (45, 13, 47, 15), *[(40, z0 + 1, 44, z0 + 3) for z0 in (19, 27, 35)]]:
-    props.append({'kind': 'box', 'pos': [(x0 + x1 + 1) / 2, 0, (z0 + z1 + 1) / 2], 'size': [x1 - x0 + 1, 0.03, z1 - z0 + 1], 'color': '#4a3424'})
+    props.append({'kind': 'box', 'pos': [(x0 + x1 + 1) / 2, 0, (z0 + z1 + 1) / 2], 'size': [x1 - x0 + 0.96, 0.03, z1 - z0 + 0.96], 'color': '#4a3424'})
 
 ground = [
     {'min': [-80, -1, -80], 'max': [52, -0.02, 130], 'color': '#141a12'},
@@ -153,7 +153,7 @@ camp = {
     'boxSpots': [P(27, 4, zone='B'), P(6, 20, zone='C'), P(43, 29, zone='D'), P(41, 4, zone='E')],
     'perks': [P(6, 27, perk='tough'), P(38, 3, perk='quick')],
     'power': P(36, 9, facing='w'),
-    'lamps': [P(20, 20), P(30, 20), P(20, 34), P(30, 34), P(7, 36), P(37, 20), P(40, 9), P(25, 5)],
+    'lamps': [P(20, 20), P(30, 20), P(20, 34), P(30, 34), P(7, 36), P(37, 20), P(37, 10), P(17, 5)],
     'ambience': 'forest', 'zombieSkin': 'robe',
     'ground': ground, 'props': props, 'traps': traps,
     'secret': {'spots': secret_spots, 'count': 3, 'drop': P(7, 23), 'reward': 'dawn'},

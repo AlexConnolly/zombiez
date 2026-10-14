@@ -113,7 +113,8 @@ export class World {
               this.renderBoxes.push({ box: b, kind: 'wall', fi });
             }
           }
-          if (t === '.' || t === 'D' || t === 'F') vis(box(x, Y - SLAB, z, x + 1, Y, z + 1), 'floor');
+          const onWall = '#W'.includes(tile(map, fi - 1, x, z));
+          if (t === '.' || t === 'D' || (t === 'F' && !onWall)) vis(box(x, Y - SLAB, z, x + 1, Y, z + 1), 'floor');
           if (t === 'F') {
             body.push(box(x, Y, z, x + 1, Y + H, z + 1));
             ray.push(box(x, Y, z, x + 1, Y + FENCE_H, z + 1));

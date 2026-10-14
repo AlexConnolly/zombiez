@@ -332,11 +332,14 @@ export class Renderer {
         }
       }
       if (p.kind === 'tent') {
-        // An A-frame, open at the front (+z).
-        const cloth = lamC(col || 0x5e5e44);
-        const slope = Math.hypot(w / 2, h);
-        for (const side of [-1, 1]) grp.add(boxMesh(0.04, slope, d, cloth, (side * w) / 4, h / 2, 0).rotateZ(side * Math.atan2(w / 2, h)));
-        grp.add(boxMesh(w * 0.9, 0.05, d * 0.8, lamC(0x3a4a5a), 0, 0.03, 0));
+        // A ridge tent: a four-sided pyramid stretched to w by d.
+        const tent = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4), lamC(col || 0x5e5e44));
+        tent.rotation.y = Math.PI / 4;
+        const box = new THREE.Group();
+        box.add(tent);
+        box.scale.set(w, h, d);
+        box.position.y = h / 2;
+        grp.add(box);
       }
       if (p.kind === 'roof') {
         // A gable over a building of w by d, eaves at the prop's y, rising h; the ridge runs along the longer side.
@@ -470,7 +473,9 @@ export class Renderer {
       const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
       this.level.add(boxMesh(long ? 1 : 0.1, 0.08, long ? 0.1 : 1, wood, cx, b.max.y - 0.04, cz));
       if (b.max.y - b.min.y > 1.1) this.level.add(boxMesh(long ? 1 : 0.1, 0.08, long ? 0.1 : 1, wood, cx, b.min.y + 0.55, cz));
-      for (const o of [-0.375, -0.125, 0.125, 0.375]) this.level.add(boxMesh(0.04, 0.95, 0.04, wood, cx + (long ? o : 0), b.min.y + 0.475, cz + (long ? 0 : o)));
+      const fence = b.max.y - b.min.y > 1.1;
+      if (fence) { if (Math.floor(long ? b.min.x : b.min.z) % 2 === 0) this.level.add(boxMesh(0.12, b.max.y - b.min.y, 0.12, wood, long ? b.min.x : cx, (b.min.y + b.max.y) / 2, long ? cz : b.min.z)); }
+      else for (const o of [-0.375, -0.125, 0.125, 0.375]) this.level.add(boxMesh(0.04, 0.95, 0.04, wood, cx + (long ? o : 0), b.min.y + 0.475, cz + (long ? 0 : o)));
     }
     // Maps with their own wall colours get an outside skin of brick, so the colours only show indoors.
     const skins: typeof rb = [];
@@ -504,7 +509,8 @@ export class Renderer {
         kind === 'floor' ? (f.floorColor ? parseInt(f.floorColor.slice(1), 16) : cellar(fi) ? 0x3a3834 : 0x4a3424) :
         kind === 'stair' ? 0x553c28 : kind === 'rail' ? 0x2a1d14 : 0x2e2822;
       const n = Math.sin(b.min.x * 12.9898 + b.min.z * 78.233 + b.min.y * 3.1) * 43758.5453;
-      col.setHex(base).multiplyScalar(0.92 + (n - Math.floor(n)) * 0.16);
+      const spread = kind === 'floor' && f?.open ? 0.04 : 0.16;
+      col.setHex(base).multiplyScalar(1 - spread / 2 + (n - Math.floor(n)) * spread);
       inst.setColorAt(i, col);
     });
     this.level.add(inst);
@@ -625,7 +631,8 @@ export class Renderer {
       const light = new THREE.PointLight(C.lamp, 9, 11, 1.6);
       light.position.set(p.x, top - 0.7, p.z);
       this.lamps.push(light);
-      this.level.add(light, boxMesh(0.02, 0.5, 0.02, lam(0x111111), p.x, top - 0.25, p.z), boxMesh(0.1, 0.12, 0.1, new THREE.MeshBasicMaterial({ color: 0xffd9a0 }), p.x, top - 0.55, p.z));
+      const rod = map.floors[floorIndex(map, l.floor)].open ? boxMesh(0.1, top - 0.55 - p.y, 0.1, lamC(0x2a1d14), p.x, (p.y + top - 0.55) / 2, p.z) : boxMesh(0.02, 0.5, 0.02, lam(0x111111), p.x, top - 0.25, p.z);
+      this.level.add(light, rod, boxMesh(0.1, 0.12, 0.1, new THREE.MeshBasicMaterial({ color: 0xffd9a0 }), p.x, top - 0.55, p.z));
     }
 
     this.trapFx.clear();
@@ -646,9 +653,9 @@ export class Renderer {
         this.fires.add(t.id);
       } else if (t.kind === 'bell') {
         // The bell hangs in the tower above; its rope comes down to the use spot.
-        this.level.add(boxMesh(0.03, 5, 0.03, lamC(0x8a7a5a), p.x, p.y + 3.5, p.z));
-        const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 0.8, 10), lamC(0x8a6a2a));
-        bell.position.set(p.x, p.y + 6.4, p.z);
+        this.level.add(boxMesh(0.03, 3.4, 0.03, lamC(0x8a7a5a), p.x, p.y + 2.4, p.z));
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 0.7, 10), lamC(0x8a6a2a));
+        bell.position.set(p.x, p.y + 4.4, p.z);
         this.level.add(bell);
         light.color.setHex(0xe8b84a);
       } else {
@@ -674,7 +681,7 @@ export class Renderer {
       this.books = map.secret.spots.map((sp) => {
         const p = placedPos(map, sp);
         const b = medal ? new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.03, 16), bookMat) : boxMesh(0.16, 0.03, 0.22, bookMat);
-        b.position.set(p.x, p.y + 0.8, p.z);
+        b.position.set(p.x, p.y + (medal ? 0.03 : 0.8), p.z);
         b.rotation.y = p.x * 1.3;
         this.level.add(b);
         return b;

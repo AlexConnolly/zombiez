@@ -121,7 +121,7 @@ describe('Camp Morrow machines', () => {
     const trap = map.traps!.find((t) => t.kind === 'fire')!;
     const p = sim.state.players[0];
     p.pos = placedPos(map, trap);
-    const inside = [zombieAt(sim, 22.5, 26.5), zombieAt(sim, 29.5, 31.5)];
+    const inside = [zombieAt(sim, 21.5, 23.5), zombieAt(sim, 20.5, 31.5)];
     const outside = zombieAt(sim, 8.5, 35.5);
     for (const z of [...inside, outside]) z.hp = 1e9;
     const evs = press(sim);
