@@ -72,6 +72,9 @@ let settingsBack = 'main';
 /** The online session, or null in solo. The NetClient survives reconnects; only the socket is replaced. */
 let online: { net: NetClient; ws: WebSocket | null; url: string; matchId: string; token: string; leaving: boolean; retryUntil: number; started: boolean } | null = null;
 const account = new Account();
+/** Off until the online services are hosted; the static site has no control or game server. */
+const MULTIPLAYER = false;
+if (!MULTIPLAYER) $('[data-go="online"]').remove();
 let overTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ---------------------------------------------------------------- input
@@ -581,7 +584,7 @@ show('menu-main');
 requestAnimationFrame(frame);
 
 // Logged in from an earlier visit? Restore the session and drop straight back into a running match.
-void account.refresh().then(async (ok) => {
+if (MULTIPLAYER) void account.refresh().then(async (ok) => {
   if (!ok) { if (new URLSearchParams(location.search).has('join')) lobbyUi.openOnline(); return; }
   const t = await account.rejoin();
   if (t.token && t.url && t.matchId && app === 'menu') startOnline(t.url, t.matchId, t.token);
