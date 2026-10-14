@@ -1,0 +1,459 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; font-family: Inter, sans-serif; }
+  .view { display: none; position: relative; }
+  .view.on { display: block; }
+  .cap { position: absolute; left: 28px; bottom: 22px; font: 600 15px Inter; color: #e9e2d6; text-shadow: 0 2px 8px #000; letter-spacing: .02em; }
+  .cap b { font: 600 22px Oswald; letter-spacing: .06em; text-transform: uppercase; display: block; color: #fff; }
+</style>
+</head>
+<body>
+<div class="view" id="road"></div>
+<div class="view" id="overview"></div>
+<div class="view" id="fire"></div>
+<div class="view" id="messhall"></div>
+<div class="view" id="lake"></div>
+<div class="view" id="tower"></div>
+<div class="view" id="plan"></div>
+<script src="r3d.js"></script>
+<script>
+// Camp Morrow: x 0..48 west to east, z 0 (south, the gate) to -42 (north), y up. One unit = 1 m.
+const W = 1280, H = 720, S1 = { s: 1 };
+const FIRE = '#ff7a2a', CANDLE = '#ffb860', HEAD = '#f4f0ff', BULB = '#ffd27a';
+const ROBE = '#cfc8b4', ROBE_DARK = '#a8a18e';
+const LOG = '#4a3322', LOG_DARK = '#3a281a', PINE = '#1c2a20', PINE_DARK = '#152018', GRASS = '#2c3424', DIRT = '#3e3426';
+let seed = 11;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+// Gaps in the palisade (barricades), as [side, from, to].
+const GAPS = { gate: ['s', 21, 27], woodpile: ['s', 30, 33], sw: ['s', 5, 8], west: ['w', -20, -17], kitchen: ['n', 29, 31], north: ['n', 41.5, 44], jetty: ['e', -19, -16], beach: ['e', -6, -3] };
+
+function robed(sc, x, y, z, face = 0, lean = 0.2) {
+  const shirt = PAL.shirt, pants = PAL.pants;
+  PAL.shirt = ROBE; PAL.pants = ROBE_DARK;
+  zombie(sc, x, y, z, 1, face, lean);
+  PAL.shirt = shirt; PAL.pants = pants;
+}
+/** A zombie wading: only shoulders and head above the water line at y = 0. */
+function wader(sc, x, z, h) {
+  box(sc, x - 0.25, -0.1, z - 0.14, x + 0.25, h, z + 0.14, ROBE, { sub: 0.3 });
+  box(sc, x - 0.15, h, z - 0.15, x + 0.15, h + 0.32, z + 0.15, PAL.skin, { sub: 0.3 });
+  glow(sc, V(x - 0.07, h + 0.2, z - 0.16), '#ffe060', 0.05, 0.95);
+  glow(sc, V(x + 0.07, h + 0.2, z - 0.16), '#ffe060', 0.05, 0.95);
+}
+function pine(sc, x, z, h = 9) {
+  box(sc, x - 0.2, 0, z - 0.2, x + 0.2, h * 0.3, z + 0.2, LOG_DARK, { sub: 4 });
+  for (let i = 0; i < 3; i++) {
+    const r = 1.8 - i * 0.5, y0 = h * (0.2 + i * 0.25), y1 = y0 + h * 0.32;
+    box(sc, x - r, y0, z - r, x + r, y1, z + r, i % 2 ? PINE : PINE_DARK, { sub: 3, skip: ['bottom'] });
+  }
+}
+function gable(sc, x0, z0, x1, z1, y, rise, color, alongX = true) {
+  // Two roof slopes over a box; the ridge runs along x (or z).
+  const o = { sub: 1, double: true };
+  if (alongX) {
+    const zm = (z0 + z1) / 2;
+    quad(sc, V(x0 - 0.3, y, z1 + 0.3), V(x1 + 0.3, y, z1 + 0.3), V(x1 + 0.3, y + rise, zm), V(x0 - 0.3, y + rise, zm), color, o);
+    quad(sc, V(x1 + 0.3, y, z0 - 0.3), V(x0 - 0.3, y, z0 - 0.3), V(x0 - 0.3, y + rise, zm), V(x1 + 0.3, y + rise, zm), color, o);
+    quad(sc, V(x0, y, z1), V(x0, y, z0), V(x0, y + rise, zm), V(x0, y + rise, zm), LOG, o);
+    quad(sc, V(x1, y, z0), V(x1, y, z1), V(x1, y + rise, zm), V(x1, y + rise, zm), LOG, o);
+  } else {
+    const xm = (x0 + x1) / 2;
+    quad(sc, V(x0 - 0.3, y, z0 - 0.3), V(x0 - 0.3, y, z1 + 0.3), V(xm, y + rise, z1 + 0.3), V(xm, y + rise, z0 - 0.3), color, o);
+    quad(sc, V(x1 + 0.3, y, z1 + 0.3), V(x1 + 0.3, y, z0 - 0.3), V(xm, y + rise, z0 - 0.3), V(xm, y + rise, z1 + 0.3), color, o);
+    quad(sc, V(x0, y, z1), V(x1, y, z1), V(xm, y + rise, z1), V(xm, y + rise, z1), LOG, o);
+    quad(sc, V(x1, y, z0), V(x0, y, z0), V(xm, y + rise, z0), V(xm, y + rise, z0), LOG, o);
+  }
+}
+function cabin(sc, x0, z0, x1, z1, h, lit, o = {}) {
+  box(sc, x0, 0, z0, x1, h, z1, o.wall ?? LOG, { sub: 0.8, skip: o.open ?? [] });
+  gable(sc, x0, z0, x1, z1, h, o.rise ?? 1.6, o.roof ?? '#2a2622', o.alongX ?? true);
+  if (lit) for (const [wx, wz, side] of lit) {
+    // A lit window: a warm pane on the wall and a little light spilling out.
+    const n = { s: [0, 0.03], n: [0, -0.03], e: [0.03, 0], w: [-0.03, 0] }[side];
+    if (side === 's' || side === 'n') box(sc, wx - 0.5, 1.1, wz + n[1] - 0.01, wx + 0.5, 1.9, wz + n[1] + 0.01, '#ffcf8a', { emissive: 1.6 });
+    else box(sc, wx + n[0] - 0.01, 1.1, wz - 0.5, wx + n[0] + 0.01, 1.9, wz + 0.5, '#ffcf8a', { emissive: 1.6 });
+    light(sc, V(wx + n[0] * 30, 1.6, wz + n[1] * 30), LAMP, 0.9, 3.5);
+  }
+}
+function fence(sc, x0, z0, x1, z1) {
+  const n = Math.max(1, Math.round(Math.hypot(x1 - x0, z1 - z0) / 2));
+  for (let i = 0; i <= n; i++) {
+    const x = x0 + ((x1 - x0) * i) / n, z = z0 + ((z1 - z0) * i) / n;
+    box(sc, x - 0.07, 0, z - 0.07, x + 0.07, 1.2, z + 0.07, LOG, { sub: 2 });
+  }
+  for (const y of [0.55, 1.05]) {
+    if (x0 === x1) box(sc, x0 - 0.05, y, Math.min(z0, z1), x0 + 0.05, y + 0.1, Math.max(z0, z1), '#5a3e28', { sub: 2 });
+    else box(sc, Math.min(x0, x1), y, z0 - 0.05, Math.max(x0, x1), y + 0.1, z0 + 0.05, '#5a3e28', { sub: 2 });
+  }
+}
+function palisade(sc) {
+  const H = 3.2, T = 0.4;
+  const inGap = (side, t) => Object.values(GAPS).some(([s, a, b]) => s === side && t > a && t < b);
+  const logs = (side, from, to) => {
+    for (let t = from; t < to; t += T) {
+      if (inGap(side, t + T / 2)) continue;
+      const h = H + ((Math.sin(t * 13.1) + 1) / 2) * 0.4;
+      if (side === 's') box(sc, t, 0, -T, t + T, h, 0, LOG, { sub: 1.2, colors: { top: '#6a4c30' } });
+      if (side === 'n') box(sc, t, 0, -42, t + T, h, -42 + T, LOG, { sub: 1.2 });
+      if (side === 'w') box(sc, -T, 0, t, 0, h, t + T, LOG, { sub: 1.2 });
+      if (side === 'e') box(sc, 48, 0, t, 48 + T, h, t + T, LOG, { sub: 1.2 });
+    }
+  };
+  logs('s', -0.4, 48.4); logs('n', -0.4, 48.4); logs('w', -42, 0); logs('e', -42, 0);
+  // Boarded gaps.
+  for (const [k, [side, a, b]] of Object.entries(GAPS)) {
+    const n = k === 'gate' ? 10 : 6;
+    if (side === 's') boards(sc, a, b, 0.3, 2.9, 0.05, n);
+    if (side === 'n') boards(sc, a, b, 0.3, 2.9, -42.05, n);
+    if (side === 'w' || side === 'e') {
+      const x = side === 'w' ? -0.05 : 48.05;
+      for (let i = 0; i < n; i++) {
+        const y = 0.3 + (2.6 * (i + 0.5)) / n, tilt = (i % 2 ? 1 : -1) * 0.08;
+        quad(sc, V(x, y - 0.07 + tilt, a - 0.1), V(x, y - 0.07 - tilt, b + 0.1), V(x, y + 0.07 - tilt, b + 0.1), V(x, y + 0.07 + tilt, a - 0.1), PAL.board, { double: true, sub: 0.4, bias: -0.05 });
+      }
+    }
+  }
+  // Gate posts either side of the main gate, taller, with a sun sign on a crossbeam.
+  box(sc, 20.4, 0, -0.6, 21, 5, 0, LOG_DARK); box(sc, 27, 0, -0.6, 27.6, 5, 0, LOG_DARK);
+  box(sc, 20.4, 4.4, -0.5, 27.6, 4.9, -0.1, LOG_DARK);
+}
+function ground(sc, x0, z0, x1, z1, step, color, sub) {
+  for (let x = x0; x < x1; x += step)
+    for (let z = z0; z < z1; z += step) {
+      const c = color(x + step / 2, z + step / 2);
+      box(sc, x, -0.2, z, x + step, 0, z + step, c, { sub, skip: ['bottom', 'left', 'right', 'front', 'back'] });
+    }
+}
+function fireCircle(sc, o = {}) {
+  const fx = 24, fz = -16;
+  // Ember bed, a few charred logs, a stone ring.
+  for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; box(sc, fx + Math.cos(a) * 1.4 - 0.2, 0, fz + Math.sin(a) * 1.4 - 0.2, fx + Math.cos(a) * 1.4 + 0.2, 0.3, fz + Math.sin(a) * 1.4 + 0.2, '#55524c', { sub: 0.4 }); }
+  box(sc, fx - 1, 0, fz - 1, fx + 1, 0.15, fz + 1, '#ff5a1a', { emissive: 2.2, sub: 0.4 });
+  box(sc, fx - 0.9, 0.1, fz - 0.15, fx + 0.9, 0.35, fz + 0.15, '#1e1612', { sub: 0.4 });
+  box(sc, fx - 0.15, 0.1, fz - 0.9, fx + 0.15, 0.45, fz + 0.9, '#2a1a10', { sub: 0.4 });
+  const k = o.flare ? 3 : 1;
+  light(sc, V(fx, 0.9, fz), FIRE, 2.6 * k, 5.5 * k);
+  glow(sc, V(fx, 0.4, fz), FIRE, 1.8 * k, 0.8);
+  glow(sc, V(fx, 0.2, fz), '#ffd080', 0.7, 0.9);
+  // A thin smoke column.
+  for (let i = 0; i < 7; i++) glow(sc, V(fx + Math.sin(i * 0.9) * 0.4 + i * 0.15, 1.5 + i * 1.3, fz - i * 0.2), '#8a8478', 0.6 + i * 0.25, 0.12);
+  // Log benches in a ring of radius 4, gap to the south.
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const x = fx + Math.cos(a) * 4.2, z = fz + Math.sin(a) * 4.2;
+    const along = Math.abs(Math.cos(a)) < 0.7;
+    box(sc, x - (along ? 1 : 0.25), 0, z - (along ? 0.25 : 1), x + (along ? 1 : 0.25), 0.45, z + (along ? 0.25 : 1), LOG, { sub: 0.5 });
+  }
+  // Tents at radius 9, open flaps.
+  for (const a of [0.3, 1.0, 2.15, 2.85, 3.6, 5.8]) {
+    const x = fx + Math.cos(a) * 9.5, z = fz + Math.sin(a) * 9.5;
+    const c = ['#6a6a4a', '#5a4a3a', '#4a5a5a'][Math.round(a * 3) % 3];
+    quad(sc, V(x - 1.2, 0, z + 1.1), V(x + 1.2, 0, z + 1.1), V(x + 1.2, 1.5, z), V(x - 1.2, 1.5, z), c, { double: true, sub: 0.6 });
+    quad(sc, V(x + 1.2, 0, z - 1.1), V(x - 1.2, 0, z - 1.1), V(x - 1.2, 1.5, z), V(x + 1.2, 1.5, z), c, { double: true, sub: 0.6 });
+  }
+  // Totem: stacked carved blocks with a sun disc.
+  box(sc, 23.6, 0, -24.4, 24.4, 3.6, -23.6, '#5a4028', { sub: 0.4 });
+  box(sc, 23.2, 3.6, -24.15, 24.8, 5.2, -23.85, o.power ? '#c8a040' : '#5a4a2a', { sub: 0.4, emissive: o.power ? 0.8 : 0 });
+  // Guitar on a bench, camcorder on a tripod with its red light.
+  box(sc, 26.3, 0.45, -12.6, 27.4, 0.55, -12.25, '#8a5a2a'); box(sc, 27.4, 0.48, -12.5, 28.3, 0.53, -12.4, '#3a2a1a');
+  line3(sc, V(22, 0, -9.5), V(22.3, 1.3, -9.8), '#222', 2); line3(sc, V(22.6, 0, -9.5), V(22.3, 1.3, -9.8), '#222', 2); line3(sc, V(22.3, 0, -10.1), V(22.3, 1.3, -9.8), '#222', 2);
+  box(sc, 22.1, 1.3, -10, 22.5, 1.55, -9.6, '#1a1a1a');
+  glow(sc, V(22.45, 1.52, -9.9), '#ff2020', 0.06, 1);
+}
+function messHall(sc, o = {}) {
+  cabin(sc, 15, -41.6, 33, -33, 3.4, o.lit ? [[18, -33, 's'], [21, -33, 's'], [28, -33, 's'], [31, -33, 's']] : null, { rise: 2.2, open: o.open });
+  // Porch and the front door (the 750 door).
+  box(sc, 22.5, 0, -33, 26.5, 0.25, -31.5, '#5a3e28');
+  box(sc, 23.2, 0, -33.05, 25.8, 2.4, -32.98, '#3a281a');
+  box(sc, 21.5, 3.6, -32.9, 27.5, 4.3, -32.8, '#2a2018'); // sign board
+}
+function chapel(sc, o = {}) {
+  cabin(sc, 3, -26, 11, -14, 4.2, o.lit ? [[11, -23.5, 'e'], [11, -16.5, 'e']] : null, { alongX: false, rise: 3, wall: '#5a4634' });
+  box(sc, 11, 0, -21, 11.05, 3, -19, '#2a1d14');
+  // Bell tower on the north end.
+  box(sc, 5, 0, -29, 9, 9, -26, '#4e3c2c', { sub: 0.8 });
+  gable(sc, 5, -29, 9, -26, 9, 2.4, '#2a2622', false);
+  box(sc, 6.4, 7, -27.8, 7.6, 8.2, -27.2, '#8a6a2a');
+  // The sun sign over the door; lit only with power.
+  box(sc, 11.05, 3.3, -20.8, 11.15, 4.1, -19.2, o.power ? '#ffd27a' : '#6a5a3a', { emissive: o.power ? 2.5 : 0 });
+  if (o.power) { light(sc, V(12, 3.7, -20), BULB, 1.6, 5); glow(sc, V(11.2, 3.7, -20), BULB, 1.2, 0.5); }
+}
+function cabins(sc, o = {}) {
+  for (const z of [-8, -16, -24]) cabin(sc, 38, z, 44, z + 4, 2.8, o.lit && z === -16 ? [[38, z + 2, 'w']] : null, { rise: 1.4 });
+  // Boathouse on the shore side, canoes.
+  cabin(sc, 43, -31, 47.4, -27, 2.6, null, { rise: 1.2, roof: '#33302a' });
+  // Washing line of robes.
+  line3(sc, V(36, 1.9, -11), V(36, 1.9, -1), '#888', 1);
+  for (let z = -10.5; z < -2; z += 1.5) quad(sc, V(36, 1.9, z), V(36, 1.9, z + 0.9), V(36, 0.8, z + 0.9), V(36, 0.8, z), ROBE, { double: true, sub: 0.5 });
+}
+function compound(sc, o = {}) {
+  cabin(sc, 37, -41, 41, -36, 2.8, o.lit ? [[41, -38.5, 'e']] : null, { rise: 1.4, alongX: false });
+  box(sc, 43, 0, -34.5, 46, 2.2, -32.6, '#3e3a34'); // generator shed
+  // Watchtower: 4 legs, platform at 6 m, rail, small roof, ladder.
+  for (const [x, z] of [[44.5, -41.5], [47.5, -41.5], [44.5, -38.5], [47.5, -38.5]]) box(sc, x - 0.15, 0, z - 0.15, x + 0.15, o.onTop ? 6 : 8.5, z + 0.15, LOG_DARK, { sub: 2 });
+  box(sc, 44.2, 6, -41.8, 47.8, 6.25, -38.2, '#5a3e28', { sub: 0.6 });
+  for (const [a, b] of [[[44.3, -38.3], [47.7, -38.3]], [[44.3, -41.7], [47.7, -41.7]], [[44.3, -41.7], [44.3, -38.3]], [[47.7, -41.7], [47.7, -38.3]]])
+    line3(sc, V(a[0], 7.2, a[1]), V(b[0], 7.2, b[1]), '#4a3322', 3);
+  if (!o.onTop) gable(sc, 44, -42, 48, -38, 8.5, 1.2, '#2a2622');
+  for (let y = 0.4; y < 6; y += 0.4) line3(sc, V(45.4, y, -38.15), V(46.4, y, -38.15), '#5a3e28', 2);
+  line3(sc, V(45.4, 0, -38.15), V(45.4, 6.4, -38.15), '#4a3322', 2.5); line3(sc, V(46.4, 0, -38.15), V(46.4, 6.4, -38.15), '#4a3322', 2.5);
+  if (o.lit) { light(sc, V(46, 7.5, -40), LAMP, 1.2, 4); glow(sc, V(46, 8, -40), LAMP, 0.4, 0.8); }
+}
+function fences(sc) {
+  // Split-rail fences between zones, with gate gaps (the doors).
+  fence(sc, 14, 0, 14, -15); fence(sc, 14, -18, 14, -42);
+  fence(sc, 34, 0, 34, -15); fence(sc, 34, -18, 34, -32);
+  fence(sc, 34, -32, 40, -32); fence(sc, 43, -32, 48, -32);
+  fence(sc, 36, -32, 36, -35); fence(sc, 36, -38, 36, -42);
+  fence(sc, 14, -32, 15, -32); fence(sc, 33, -32, 36, -32);
+}
+function festoons(sc) {
+  // Power on: strings of warm bulbs over every zone.
+  const runs = [[[15, 3.2, -32], [24, 5, -16]], [[33, 3.2, -32], [24, 5, -16]], [[24, 5, -16], [14, 3, -4]], [[24, 5, -16], [34, 3, -4]], [[6, 3, -6], [11, 3.5, -12]], [[38, 2.8, -4], [44, 2.8, -26]], [[37, 2.8, -36], [44, 6, -38]]];
+  for (const [a, b] of runs) {
+    const A = V(...a), B = V(...b), n = 8;
+    for (let i = 0; i < n; i++) {
+      const p = lerp3(A, B, i / n), q = lerp3(A, B, (i + 1) / n);
+      const sag = (t) => -Math.sin(t * Math.PI) * 0.6;
+      line3(sc, V(p.x, p.y + sag(i / n), p.z), V(q.x, q.y + sag((i + 1) / n), q.z), '#222', 1);
+      glow(sc, V(p.x, p.y + sag(i / n) - 0.1, p.z), BULB, 0.35, 0.9);
+    }
+    const m = lerp3(A, B, 0.5);
+    light(sc, V(m.x, m.y - 0.5, m.z), BULB, 1.3, 7);
+  }
+}
+function forest(sc, o = {}) {
+  seed = o.seed ?? 11;
+  const lakeX = 50;
+  for (let i = 0; i < (o.n ?? 160); i++) {
+    const x = -40 + rnd() * 90, z = -80 + rnd() * 110;
+    const inCamp = x > -4 && x < 52 && z > -46 && z < 4;
+    const onRoad = x > 18 && x < 30 && z > 0;
+    if (inCamp || onRoad || x > lakeX - 2) continue;
+    if (o.near && Math.hypot(x - o.near[0], z - o.near[1]) > o.near[2]) continue;
+    pine(sc, x, z, 8 + rnd() * 6);
+  }
+  // Trees on the far shore of the lake.
+  for (let z = -80; z < 30; z += 4) pine(sc, 92 + rnd() * 6, z, 9 + rnd() * 5);
+}
+function lake(sc) {
+  box(sc, 50, -0.6, -80, 92, -0.05, 30, '#0c1620', { sub: 3, skip: ['bottom', 'left', 'right', 'front', 'back'] });
+  // Beach strip and the jetty.
+  box(sc, 48.4, -0.2, -42, 50, 0, 0, '#4a4234', { sub: 1, skip: ['bottom'] });
+  box(sc, 48.4, 0.1, -18.6, 62, 0.3, -16.6, '#5a4630', { sub: 0.6 });
+  for (let x = 50; x < 62; x += 2.5) { box(sc, x, -0.6, -18.8, x + 0.2, 0.3, -18.6, LOG_DARK); box(sc, x, -0.6, -16.6, x + 0.2, 0.3, -16.4, LOG_DARK); }
+  box(sc, 56, -0.1, -21, 59.5, 0.3, -20, '#6a3a2a', { sub: 0.5 }); // a rowing boat
+}
+function road(sc, o = {}) {
+  box(sc, 20, -0.15, 0, 28, 0.02, 60, '#2e2a24', { sub: 1.2, skip: ['bottom'] });
+  // Minibus, headlights on, driver's door open.
+  box(sc, 18.4, 0.3, 8, 21, 2.6, 15.5, '#c8c4b8', { sub: 0.5, colors: { back: '#b8b4a8' } });
+  box(sc, 18.5, 1.5, 7.98, 20.9, 2.3, 8, '#1a2028', { sub: 0.4 });
+  for (const x of [18.7, 20.7]) for (const z of [9, 14.5]) box(sc, x - 0.15, 0, z - 0.4, x + 0.15, 0.6, z + 0.4, '#151515');
+  quad(sc, V(21, 0.5, 8.6), V(21, 0.5, 9.8), V(22, 2.2, 9.6), V(22, 2.2, 8.6), '#bdb9ad', { double: true });
+  for (const x of [18.8, 20.6]) {
+    glow(sc, V(x, 0.9, 7.95), '#ffffff', 0.3, 1);
+    withRaw(sc, () => spot(sc, V(x, 0.9, 7.8), V(0.25, -0.06, -1), HEAD, 5, 18, 24));
+  }
+  glow(sc, V(19.7, 0.9, 7.6), HEAD, 3, 0.25);
+}
+function camp(sc, o = {}) {
+  ground(sc, -60, -100, 120, 60, 10, (x, z) => (x > 20 && x < 28 && z > 0 ? '#2e2a24' : x > 50 ? '#0c1620' : PINE_DARK), 2);
+  ground(sc, 0, -42, 48, 0, 3, (x, z) => (Math.hypot(x - 24, z + 16) < 7 || (x > 21 && x < 27 && z > -16) ? DIRT : GRASS), 0.75);
+  palisade(sc); fences(sc); fireCircle(sc, o); messHall(sc, { lit: true }); chapel(sc, { lit: true, power: o.power });
+  cabins(sc, { lit: true }); compound(sc, { lit: !o.onTop, onTop: o.onTop }); lake(sc); road(sc, o);
+  // Woodpile in the woodpile gap.
+  for (let i = 0; i < 4; i++) box(sc, 30.2, i * 0.3, -1.6 + i * 0.1, 32.8, i * 0.3 + 0.3, -0.5, '#5a3e28', { sub: 0.6 });
+  if (o.power) festoons(sc);
+  // Moon, low in the east over the lake.
+  light(sc, V(120, 60, -40), MOON, o.moon ?? 1.4, 200);
+  if (o.forest !== false) forest(sc, o.forestOpts ?? {});
+}
+const label = (cam, x, y, z, title, sub, color = '#e8b84a') => {
+  const p = projectWorld(cam, V(x, y, z));
+  if (!p) return '';
+  return `<g font-family="Oswald" text-anchor="middle" style="paint-order:stroke" stroke="#000" stroke-width="5" stroke-opacity=".75"><text x="${p[0]}" y="${p[1]}" font-size="21" font-weight="600" fill="${color}" letter-spacing="1.5">${title}</text>${sub ? `<text x="${p[0]}" y="${p[1] + 20}" font-family="Inter" font-size="13" font-weight="600" fill="#e9e2d6">${sub}</text>` : ''}</g>`;
+};
+const prompt = (text, cost) => `<g font-family="Inter" font-weight="600" font-size="20" fill="#f2eee6" style="paint-order:stroke" stroke="#000" stroke-width="4"><rect x="490" y="497" width="28" height="26" rx="4" fill="none" stroke="#f2eee6" stroke-width="2"/><text x="504" y="516" text-anchor="middle" font-size="16" stroke-width="0">E</text><text x="528" y="518">${text} <tspan fill="#e8b84a">${cost}</tspan></text></g>`;
+const gunModel = () => `<polygon points="860,720 900,560 1010,540 1080,720" fill="#1b1c1f"/><polygon points="900,560 1010,540 1030,600 925,618" fill="#2a2c30"/>`;
+const crossbowModel = () => `<g><polygon points="820,720 870,600 960,585 1010,720" fill="#3a2a1c"/><polygon points="700,610 1120,575 1124,590 704,626" fill="#1b1c1f"/><line x1="702" y1="618" x2="915" y2="640" stroke="#bbb" stroke-width="1.5"/><line x1="1122" y1="582" x2="915" y2="640" stroke="#bbb" stroke-width="1.5"/><polygon points="905,585 925,560 935,640 912,650" fill="#2a2c30"/><line x1="918" y1="600" x2="930" y2="480" stroke="#c8c0a8" stroke-width="4"/></g>`;
+const SKY = skyGrad('#05070d', '#141c2a');
+const stars = (n) => { let s = '', k = 7; const r = () => ((k = (k * 16807) % 2147483647) / 2147483647); for (let i = 0; i < n; i++) s += `<circle cx="${r() * W}" cy="${r() * H * 0.45}" r="${0.4 + r() * 0.8}" fill="#dfe6ff" fill-opacity="${0.2 + r() * 0.5}"/>`; return s; };
+
+const views = {
+  road() {
+    const sc = Scene({ ...S1, ambient: [0.035, 0.04, 0.06], exposure: 1.4, fog: { c: [0.02, 0.025, 0.04], start: 18, end: 70, max: 0.85 }, sky: (cam) => SKY(cam) + stars(140) });
+    camp(sc, { forestOpts: { n: 260 } });
+    for (const [x, z, f] of [[23.5, 1.4, Math.PI], [21.8, 2.4, Math.PI + 0.3], [25.9, 1.2, Math.PI - 0.2], [24.6, 5.5, Math.PI], [26.5, 9, Math.PI + 0.2]]) robed(sc, x, 0, z, f, 0.25);
+    // Fire glow over the palisade.
+    glow(sc, V(24, 3, -14), FIRE, 9, 0.22);
+    const cam = camera(V(28.5, 2.2, 22), V(23, 2.0, 0), 720, W, H, 1);
+    return render(sc, cam, vignette(W, H, 0.8)) + caption('The main gate', 'The minibus is still running, headlights on the boards. Smoke from the fire rises over the palisade.');
+  },
+
+  overview() {
+    const sc = Scene({ ...S1, ambient: [0.05, 0.055, 0.075], exposure: 1.35, fog: { c: [0.02, 0.025, 0.04], start: 60, end: 140, max: 0.8 }, sky: SKY });
+    camp(sc, { power: true, forestOpts: { n: 220 } });
+    for (const [x, z] of [[23.5, 6], [22, 4], [30.5, 2], [6, 2.5], [-2, -18], [51, -10], [55, -17.5], [30, -44], [42, -44], [-2, -30]]) robed(sc, x, x > 50 ? 0.3 : 0, z, 0, 0.2);
+    player(sc, 23, 0, -11, 1, '#3a6ea5'); player(sc, 25.5, 0, -12, 1, '#a53a3a');
+    const cam = camera(V(-6, 34, 26), V(27, 0, -21), 1000, W, 900, 1);
+    const labels = [
+      [19, 0.5, -9, 'A · Fire circle', 'start'], [24, 6.5, -37, 'B · Mess hall', '750'], [7, 11, -24, 'C · Chapel', '1000'],
+      [41, 4.5, -18, 'D · Cabins', '1000'], [42, 10.5, -39, 'E · Compound', '1250'], [28, 5.5, 2, 'Main gate', '10 boards'], [62, 1.5, -24, 'Lake', 'zombies wade in'],
+    ].map((l) => label(cam, ...l)).join('');
+    return render(sc, cam, labels + vignette(W, 900, 0.6)) + caption('Camp Morrow, power on', 'Five zones in one clearing. Fences are low: you see, and shoot, across the whole camp.');
+  },
+
+  fire() {
+    const sc = Scene({ ...S1, ambient: [0.03, 0.035, 0.05], exposure: 1.05, fog: { c: [0.02, 0.025, 0.04], start: 20, end: 60, max: 0.9 }, sky: (cam) => SKY(cam) + stars(90) });
+    camp(sc, { forestOpts: { n: 200 } });
+    for (const [x, z, f] of [[33.5, -10, -1.2], [32.6, -14, -1.4]]) robed(sc, x + 2.5, 0, z, f, 0.2); // beyond the east fence
+    robed(sc, 22.2, 0, -30.5, 0.2, 0.2);
+    const cam = camera(V(25.2, 1.6, -7.2), V(24.2, 0.6, -18), 700, W, H, 1);
+    return render(sc, cam, gunModel() + prompt('Feed the fire', '1,000') + vignette(W, H, 0.82)) + caption('The fire circle (start)', 'Embers still hot, a guitar left on a log, the camcorder still recording. Tents in a ring, the mess hall behind.');
+  },
+
+  messhall() {
+    const sc = Scene({ ...S1, ambient: [0.025, 0.025, 0.03], exposure: 1.25, fog: { c: [0.02, 0.018, 0.016], start: 10, end: 30, max: 0.6 } });
+    // Interior: floor, inside faces of the walls, a ceiling, long tables with plates, the kitchen at the east end.
+    box(sc, 15, -0.2, -41.6, 33, 0, -33, '#4a3424', { sub: 0.8, skip: ['bottom'] });
+    box(sc, 14.7, 0, -41.9, 15, 3.4, -33, LOG, { sub: 0.8 }); box(sc, 33, 0, -41.9, 33.3, 3.4, -33, LOG, { sub: 0.8 });
+    box(sc, 15, 0, -41.9, 33, 3.4, -41.6, LOG, { sub: 0.8, skip: ['front'] });
+    quad(sc, V(15, 0, -41.6), V(29, 0, -41.6), V(29, 3.4, -41.6), V(15, 3.4, -41.6), LOG, { sub: 0.8 });
+    quad(sc, V(31, 0, -41.6), V(33, 0, -41.6), V(33, 3.4, -41.6), V(31, 3.4, -41.6), LOG, { sub: 0.8 });
+    quad(sc, V(29, 2.4, -41.6), V(31, 2.4, -41.6), V(31, 3.4, -41.6), V(29, 3.4, -41.6), LOG, { sub: 0.8 });
+    quad(sc, V(15, 3.4, -33), V(33, 3.4, -33), V(33, 3.4, -41.6), V(15, 3.4, -41.6), '#3a2a1c', { double: true, sub: 0.8 });
+    for (let x = 16; x < 33; x += 3) box(sc, x, 3.1, -41.6, x + 0.3, 3.4, -33, LOG_DARK);
+    for (const z of [-35.5, -38.5]) {
+      box(sc, 16, 0.75, z - 0.5, 26.5, 0.85, z + 0.5, '#6a4a30', { sub: 0.5 });
+      for (let x = 16.6; x < 26; x += 1.2) {
+        for (const dz of [-0.3, 0.3]) { box(sc, x - 0.18, 0.85, z + dz - 0.18, x + 0.18, 0.9, z + dz + 0.18, '#d8d4c8'); box(sc, x - 0.12, 0.9, z + dz - 0.12, x + 0.12, 0.92, z + dz + 0.12, '#7a4a2a'); }
+      }
+      box(sc, 16, 0, z - 1.1, 26.5, 0.45, z - 0.8, '#5a3e28'); box(sc, 16, 0, z + 0.8, 26.5, 0.45, z + 1.1, '#5a3e28');
+    }
+    box(sc, 19, 0, -34, 19.4, 0.5, -33.2, '#5a3e28'); // a chair knocked over
+    // Kitchen: stove with steaming pots, counter, the boarded back door.
+    box(sc, 28, 0, -41.5, 32.8, 0.95, -40.6, '#3a3a3a', { sub: 0.4 });
+    for (const x of [28.6, 29.6]) { box(sc, x - 0.25, 0.95, -41.2, x + 0.25, 1.35, -40.8, '#55595f'); glow(sc, V(x, 1.7, -41), '#c8c8c8', 0.5, 0.18); }
+    box(sc, 26.5, 0, -36.5, 27.2, 1, -33.5, '#5a4a3a', { sub: 0.4 }); // serving counter
+    boards(sc, 29, 31, 0.2, 2.3, -41.55, 6);
+    robed(sc, 30, 0, -42.6, 0, 0.3);
+    light(sc, V(30, 1.6, -42.3), MOON, 1.2, 3);
+    // Lamps hanging over the tables.
+    for (const x of [18, 23, 28]) { box(sc, x - 0.2, 2.7, -37.2, x + 0.2, 2.9, -36.8, '#ffd08a', { emissive: 2.5 }); light(sc, V(x, 2.6, -37), LAMP, 1.3, 3.5); glow(sc, V(x, 2.75, -37), LAMP, 0.6, 0.6); }
+    light(sc, V(29, 2.2, -40), '#ff9a50', 1, 2.5);
+    const cam = camera(V(23.5, 1.6, -35.2), V(30, 1.2, -41.6), 640, W, H, 1);
+    return render(sc, cam, gunModel() + vignette(W, H, 0.85)) + caption('Mess hall: the kitchen door', 'Stew still on the plates, pots still steaming. The kitchen back door is a barricade: they come in through the building.');
+  },
+
+  lake() {
+    const sc = Scene({ ...S1, ambient: [0.03, 0.04, 0.065], exposure: 1.5, fog: { c: [0.03, 0.04, 0.06], start: 20, end: 70, max: 0.85 }, sky: (cam) => SKY(cam) + stars(200) + `<circle cx="980" cy="150" r="34" fill="#e4ecff"/><circle cx="980" cy="150" r="90" fill="#9fb4d8" fill-opacity=".12"/>` });
+    camp(sc, { moon: 2.2, forestOpts: { n: 60 } });
+    // Moon path on the water.
+    for (let i = 0; i < 9; i++) box(sc, 64 + i * 3, -0.04, -11 - i * 1.1, 65.6 + i * 3, -0.03, -9.6 - i * 1.1, '#5a6a8a', { emissive: 0.9, sub: 2, skip: ['bottom', 'left', 'right', 'front', 'back'] });
+    for (const [x, z, h] of [[58, -13, 0.25], [63, -21, 0.05], [55, -9, 0.6], [67, -15, -0.05], [52.5, -14.5, 0.9]]) wader(sc, x, z, h);
+    robed(sc, 60.5, 0.3, -17.6, -Math.PI / 2, 0.25);
+    const cam = camera(V(49.2, 1.9, -17.6), V(62, 0.5, -15), 720, W, H, 1);
+    return render(sc, cam, vignette(W, H, 0.75)) + caption('The lake', 'From the jetty gate. Eyes above the water first, then they wade out and walk the jetty.');
+  },
+
+  tower() {
+    const sc = Scene({ ...S1, ambient: [0.05, 0.055, 0.075], exposure: 1.4, fog: { c: [0.02, 0.025, 0.04], start: 30, end: 90, max: 0.75 }, sky: SKY });
+    camp(sc, { power: true, onTop: true, forestOpts: { n: 160 } });
+    for (const [x, z, f] of [[38, -28, 0.8], [40, -24.5, 0.8], [41.5, -27, 0.6], [44, -30, 1], [30, -20, 0.5], [27.5, -21.5, 0.4], [20, -12, 0.2], [36.5, -21, 0.7]]) robed(sc, x, 0, z, f, 0.25);
+    player(sc, 25, 0, -18.5, 1, '#3a6ea5');
+    const cam = camera(V(45.5, 7.7, -39.2), V(28, 0, -15), 760, W, H, 1);
+    return render(sc, cam, crossbowModel() + prompt('Hunting crossbow', '1,500') + vignette(W, H, 0.7)) + caption('The watchtower', 'Six metres up, the whole camp below. One ladder, one at a time.');
+  },
+
+  plan() {
+    // Top-down plan: zones, fences and gates, barricades, buys.
+    const PW = 1280, PH = 900, s = 16, ox = 230, oy = 790;
+    const X = (x) => ox + x * s, Y = (z) => oy + z * s;
+    const zones = [
+      ['A', 'Fire circle', 'start', 14, -32, 34, 0, '#5a3a20'], ['B', 'Mess hall', '750', 14, -42, 36, -32, '#3a4a2a'], ['C', 'Chapel', '1000', 0, -42, 14, 0, '#2f3f58'],
+      ['D', 'Cabins', '1000', 34, -32, 48, 0, '#3a3a52'], ['E', 'Compound', '1250', 36, -42, 48, -32, '#55402a'],
+    ];
+    let g = `<rect width="${PW}" height="${PH}" fill="#0d1014"/>`;
+    // Forest and lake around the camp.
+    g += `<rect x="${X(-12)}" y="${Y(-52)}" width="${60 * s}" height="${62 * s}" fill="#121a14"/>`;
+    g += `<rect x="${X(50)}" y="${Y(-52)}" width="${18 * s}" height="${62 * s}" fill="#0c1826"/>`;
+    g += `<rect x="${X(20)}" y="${Y(0)}" width="${8 * s}" height="${10 * s}" fill="#2a2620"/>`;
+    for (const [k, name, cost, x0, z0, x1, z1, c] of zones) {
+      g += `<rect x="${X(x0)}" y="${Y(z0)}" width="${(x1 - x0) * s}" height="${(z1 - z0) * s}" fill="${c}" fill-opacity=".55"/>`;
+    }
+    // Buildings.
+    const bld = [[15, -41.6, 33, -33, 'Mess hall'], [3, -26, 11, -14, 'Chapel'], [5, -29, 9, -26, ''], [38, -8, 44, -4, 'Cabin 3'], [38, -16, 44, -12, 'Cabin 2'], [38, -24, 44, -20, 'Cabin 1'], [43, -31, 47.4, -27, 'Boathouse'], [37, -41, 41, -36, ''], [43, -34.5, 46, -32.6, ''], [44.2, -41.8, 47.8, -38.2, '']];
+    for (const [x0, z0, x1, z1, n] of bld) g += `<rect x="${X(x0)}" y="${Y(z0)}" width="${(x1 - x0) * s}" height="${(z1 - z0) * s}" fill="#2a2016" stroke="#c8a878" stroke-width="1.5"/>` + (n ? `<text x="${X((x0 + x1) / 2)}" y="${Y((z0 + z1) / 2) + 4}" font-family="Inter" font-size="11" font-weight="600" fill="#e9dcc4" text-anchor="middle">${n}</text>` : '');
+    // Palisade with gaps.
+    const pal = (x0, z0, x1, z1) => `<line x1="${X(x0)}" y1="${Y(z0)}" x2="${X(x1)}" y2="${Y(z1)}" stroke="#8a6a44" stroke-width="7"/>`;
+    const sides = { s: [], n: [], w: [], e: [] };
+    for (const [side, a, b] of Object.values(GAPS)) sides[side].push([a, b]);
+    const run = (side, from, to, draw) => { let t = from; for (const [a, b] of [...sides[side]].sort((p, q) => p[0] - q[0])) { g += draw(t, a); t = b; } g += draw(t, to); };
+    run('s', 0, 48, (a, b) => pal(a, 0, b, 0)); run('n', 0, 48, (a, b) => pal(a, -42, b, -42));
+    run('w', -42, 0, (a, b) => pal(0, a, 0, b)); run('e', -42, 0, (a, b) => pal(48, a, 48, b));
+    for (const [k, [side, a, b]] of Object.entries(GAPS)) {
+      const [x0, z0, x1, z1] = side === 's' ? [a, 0, b, 0] : side === 'n' ? [a, -42, b, -42] : side === 'w' ? [0, a, 0, b] : [48, a, 48, b];
+      g += `<line x1="${X(x0)}" y1="${Y(z0)}" x2="${X(x1)}" y2="${Y(z1)}" stroke="#ff5a3a" stroke-width="7" stroke-dasharray="4 3"/>`;
+    }
+    // Fences (dashed thin) and gates (gold).
+    const fen = [[14, 0, 14, -15], [14, -18, 14, -42], [34, 0, 34, -15], [34, -18, 34, -32], [34, -32, 40, -32], [43, -32, 48, -32], [36, -32, 36, -35], [36, -38, 36, -42], [14, -32, 15, -32], [33, -32, 36, -32]];
+    for (const [x0, z0, x1, z1] of fen) g += `<line x1="${X(x0)}" y1="${Y(z0)}" x2="${X(x1)}" y2="${Y(z1)}" stroke="#b89a70" stroke-width="2.5"/>`;
+    const gates = [[14, -18, 14, -15, '1000'], [34, -18, 34, -15, '1000'], [23.2, -33, 25.8, -33, '750'], [40, -32, 43, -32, '1250'], [36, -38, 36, -35, '1250']];
+    for (const [x0, z0, x1, z1, c] of gates) g += `<line x1="${X(x0)}" y1="${Y(z0)}" x2="${X(x1)}" y2="${Y(z1)}" stroke="#e8b84a" stroke-width="6"/><text x="${X((x0 + x1) / 2) + (x0 === x1 ? 8 : 0)}" y="${Y((z0 + z1) / 2) + (x0 === x1 ? 4 : 18)}" font-family="Oswald" font-size="13" fill="#e8b84a" text-anchor="${x0 === x1 ? 'start' : 'middle'}">${c}</text>`;
+    // Fire, ring of benches, tents, totem.
+    g += `<circle cx="${X(24)}" cy="${Y(-16)}" r="${9 * s}" fill="none" stroke="#ff7a2a" stroke-opacity=".35" stroke-dasharray="6 6"/>`;
+    g += `<circle cx="${X(24)}" cy="${Y(-16)}" r="${6 * s}" fill="#ff7a2a" fill-opacity=".10"/>`;
+    g += `<circle cx="${X(24)}" cy="${Y(-16)}" r="${4.2 * s}" fill="none" stroke="#8a6a44" stroke-width="5" stroke-dasharray="20 12"/>`;
+    g += `<circle cx="${X(24)}" cy="${Y(-16)}" r="16" fill="#ff7a2a"/><circle cx="${X(24)}" cy="${Y(-16)}" r="7" fill="#ffd080"/>`;
+    for (const a of [0.3, 1.0, 2.15, 2.85, 3.6, 5.8]) g += `<polygon points="${X(24 + Math.cos(a) * 9.5) - 14},${Y(-16 + Math.sin(a) * 9.5) + 12} ${X(24 + Math.cos(a) * 9.5) + 14},${Y(-16 + Math.sin(a) * 9.5) + 12} ${X(24 + Math.cos(a) * 9.5)},${Y(-16 + Math.sin(a) * 9.5) - 12}" fill="#6a6a4a"/>`;
+    g += `<rect x="${X(23.6)}" y="${Y(-24.4)}" width="13" height="13" fill="#c8a040"/>`;
+    // Jetty, minibus.
+    g += `<rect x="${X(48.4)}" y="${Y(-18.6)}" width="${13.6 * s}" height="${2 * s}" fill="#5a4630"/>`;
+    g += `<rect x="${X(22)}" y="${Y(8)}" width="${2.6 * s}" height="${2 * s}" fill="#c8c4b8"/><text x="${X(26)}" y="${Y(9)}" font-family="Inter" font-size="11" fill="#c8c4b8">minibus, headlights on</text>`;
+    // Icons for buys, traps, perks, power, box.
+    const icon = (x, z, col, txt, sub, anchor = 'start') => `<circle cx="${X(x)}" cy="${Y(z)}" r="7" fill="${col}" stroke="#000" stroke-width="1.5"/><text x="${X(x) + (anchor === 'start' ? 11 : -11)}" y="${Y(z) + 4}" font-family="Inter" font-size="12" font-weight="600" fill="#f2eee6" text-anchor="${anchor}" style="paint-order:stroke" stroke="#000" stroke-width="3">${txt}${sub ? ` <tspan fill="#e8b84a">${sub}</tspan>` : ''}</text>`;
+    g += icon(24, -22, '#e8b84a', 'Longshot', '500');
+    g += icon(28, -16, '#ff7a2a', 'Feed the fire', '1000');
+    g += icon(20, -38.5, '#e8b84a', 'Ripper', '1000');
+    g += icon(27, -36, '#b070ff', 'Box start', '');
+    g += icon(7, -29.6, '#ff7a2a', 'Vespers bell', '750', 'start');
+    g += icon(5, -18, '#4ac0ff', 'Tough Juice', '');
+    g += icon(7, -15, '#d0b060', 'Altar', '(secret)');
+    g += icon(39, -10, '#e8b84a', 'Barnburner', '1200');
+    g += icon(38, -38.5, '#4ac0ff', 'Quick Hands', '', 'start');
+    g += icon(44.5, -33.5, '#ffe060', 'Power', '', 'start');
+    g += icon(46, -40, '#e8b84a', 'Crossbow', '1500', 'end');
+    // Zone letters.
+    for (const [k, name, cost, x0, z0, x1, z1] of zones) {
+      const cx = k === 'A' ? 19 : k === 'C' ? 7 : k === 'D' ? 41 : (x0 + x1) / 2;
+      const cz = k === 'A' ? -4 : k === 'C' ? -6 : k === 'D' ? -1.8 : k === 'B' ? -45.5 : -45.5;
+      g += `<text x="${X(cx)}" y="${Y(cz)}" font-family="Oswald" font-size="20" font-weight="600" fill="#fff" text-anchor="middle" letter-spacing="1.5">${k} · ${name.toUpperCase()}</text><text x="${X(cx)}" y="${Y(cz) + 17}" font-family="Inter" font-size="12" fill="#e9e2d6" text-anchor="middle">${cost}</text>`;
+    }
+    // Zombie routes: arrows from the forest to each barricade.
+    const arrow = (x0, z0, x1, z1) => `<line x1="${X(x0)}" y1="${Y(z0)}" x2="${X(x1)}" y2="${Y(z1)}" stroke="#ff5a3a" stroke-width="2" stroke-opacity=".8" marker-end="url(#ah)"/>`;
+    g += `<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ff5a3a"/></marker></defs>`;
+    g += arrow(24, 9.5, 24, 1) + arrow(31.5, 6, 31.5, 1) + arrow(6.5, 6, 6.5, 1) + arrow(-9, -18.5, -1, -18.5) + arrow(30, -50, 30, -43) + arrow(42.7, -50, 42.7, -43) + arrow(60, -17.6, 49, -17.6) + arrow(58, -4.5, 49, -4.5);
+    // Legend and scale.
+    const lg = [['#8a6a44', 'Palisade (3.2 m)'], ['#ff5a3a', 'Barricade'], ['#b89a70', 'Fence (1.2 m, shoot over)'], ['#e8b84a', 'Gate (door) and cost']];
+    lg.forEach(([c, t], i) => (g += `<rect x="40" y="${60 + i * 26}" width="22" height="6" fill="${c}"/><text x="72" y="${67 + i * 26}" font-family="Inter" font-size="13" fill="#e9e2d6">${t}</text>`));
+    g += `<text x="40" y="40" font-family="Oswald" font-size="26" font-weight="600" fill="#fff" letter-spacing="2">CAMP MORROW · TOP DOWN</text>`;
+    g += `<line x1="40" y1="190" x2="${40 + 10 * s}" y2="190" stroke="#e9e2d6" stroke-width="2"/><text x="40" y="208" font-family="Inter" font-size="12" fill="#e9e2d6">10 m</text>`;
+    g += `<text x="${X(55)}" y="${Y(-30)}" font-family="Oswald" font-size="18" fill="#6a8ab8" text-anchor="middle">LAKE</text><text x="${X(18)}" y="${Y(-48)}" font-family="Oswald" font-size="16" fill="#4a6a50">FOREST</text><text x="${X(24)}" y="${Y(10.5)}" font-family="Oswald" font-size="14" fill="#8a8070" text-anchor="middle">ROAD</text>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}">${g}</svg>`;
+  },
+};
+
+const id = location.hash.slice(1) || 'road';
+const el = document.getElementById(id);
+el.innerHTML = views[id]();
+el.classList.add('on');
+</script>
+</body>
+</html>
