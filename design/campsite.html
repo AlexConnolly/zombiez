@@ -31,7 +31,7 @@ let seed = 11;
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 
 // Gaps in the palisade (barricades), as [side, from, to].
-const GAPS = { gate: ['s', 21, 27], woodpile: ['s', 30, 33], sw: ['s', 5, 8], west: ['w', -20, -17], kitchen: ['n', 29, 31], north: ['n', 41.5, 44], jetty: ['e', -19, -16], beach: ['e', -6, -3] };
+const GAPS = { gate: ['s', 21, 27], woodpile: ['s', 30, 33], sw: ['s', 5, 8], west: ['w', -20, -17], kitchen: ['n', 29, 31], north: ['n', 41.5, 44], jetty: ['e', -19, -16], beach: ['e', -6, -3], tower: ['e', -41.2, -39.4] };
 
 function robed(sc, x, y, z, face = 0, lean = 0.2) {
   const shirt = PAL.shirt, pants = PAL.pants;
@@ -195,15 +195,22 @@ function cabins(sc, o = {}) {
 function compound(sc, o = {}) {
   cabin(sc, 37, -41, 41, -36, 2.8, o.lit ? [[41, -38.5, 'e']] : null, { rise: 1.4, alongX: false });
   box(sc, 43, 0, -34.5, 46, 2.2, -32.6, '#3e3a34'); // generator shed
-  // Watchtower: 4 legs, platform at 6 m, rail, small roof, ladder.
-  for (const [x, z] of [[44.5, -41.5], [47.5, -41.5], [44.5, -38.5], [47.5, -38.5]]) box(sc, x - 0.15, 0, z - 0.15, x + 0.15, o.onTop ? 6 : 8.5, z + 0.15, LOG_DARK, { sub: 2 });
-  box(sc, 44.2, 6, -41.8, 47.8, 6.25, -38.2, '#5a3e28', { sub: 0.6 });
-  for (const [a, b] of [[[44.3, -38.3], [47.7, -38.3]], [[44.3, -41.7], [47.7, -41.7]], [[44.3, -41.7], [44.3, -38.3]], [[47.7, -41.7], [47.7, -38.3]]])
-    line3(sc, V(a[0], 7.2, a[1]), V(b[0], 7.2, b[1]), '#4a3322', 3);
-  if (!o.onTop) gable(sc, 44, -42, 48, -38, 8.5, 1.2, '#2a2622');
-  for (let y = 0.4; y < 6; y += 0.4) line3(sc, V(45.4, y, -38.15), V(46.4, y, -38.15), '#5a3e28', 2);
-  line3(sc, V(45.4, 0, -38.15), V(45.4, 6.4, -38.15), '#4a3322', 2.5); line3(sc, V(46.4, 0, -38.15), V(46.4, 6.4, -38.15), '#4a3322', 2.5);
-  if (o.lit) { light(sc, V(46, 7.5, -40), LAMP, 1.2, 4); glow(sc, V(46, 8, -40), LAMP, 0.4, 0.8); }
+  // Watchtower: a log tower with stairs inside. Its ground-floor door (east, outside the palisade) is a barricade.
+  box(sc, 44.4, 0, -42, 44.8, 6, -38.4, LOG, { sub: 0.8 });
+  box(sc, 44.4, 0, -42, 48, 6, -41.6, LOG, { sub: 0.8 });
+  box(sc, 44.4, 0, -38.8, 48, 6, -38.4, LOG, { sub: 0.8 });
+  box(sc, 47.6, 0, -41.6, 48, 6, -41.2, LOG, { sub: 0.8 }); box(sc, 47.6, 0, -39.4, 48, 6, -38.8, LOG, { sub: 0.8 });
+  box(sc, 47.6, 2.9, -41.2, 48, 6, -39.4, LOG, { sub: 0.8 });
+  box(sc, 44.4, 2.6, -38.4, 45.6, 2.7, -38.35, '#2a1d14'); // the players' door from the compound
+  box(sc, 44.6, 0, -38.38, 45.6, 2.5, -38.36, '#2a1d14');
+  box(sc, 44.2, 6, -42.2, 48.2, 6.25, -38.2, '#5a3e28', { sub: 0.6 });
+  box(sc, 45.1, 6.24, -39.7, 46.1, 6.26, -38.7, '#0a0806'); // stair hatch
+  if (o.onTop) { robed(sc, 45.6, 5.0, -39.2, Math.PI / 2, 0.1); light(sc, V(45.6, 6.9, -39.2), MOON, 1, 2); }
+  for (const [x, z] of [[44.3, -42.1], [48.1, -42.1], [44.3, -38.3], [48.1, -38.3]]) box(sc, x - 0.12, 6.25, z - 0.12, x + 0.12, o.onTop ? 7.3 : 8.6, z + 0.12, LOG_DARK, { sub: 2 });
+  for (const [a, b] of [[[44.3, -38.3], [48.1, -38.3]], [[44.3, -42.1], [48.1, -42.1]], [[44.3, -42.1], [44.3, -38.3]], [[48.1, -42.1], [48.1, -38.3]]])
+    line3(sc, V(a[0], 7.3, a[1]), V(b[0], 7.3, b[1]), '#4a3322', 3);
+  if (!o.onTop) gable(sc, 44, -42.4, 48.4, -38, 8.6, 1.2, '#2a2622');
+  if (o.lit) { light(sc, V(46.2, 8, -40.2), LAMP, 1.2, 4); glow(sc, V(46.2, 8.3, -40.2), LAMP, 0.4, 0.8); }
 }
 function fences(sc) {
   // Split-rail fences between zones, with gate gaps (the doors).
@@ -213,10 +220,10 @@ function fences(sc) {
   fence(sc, 36, -32, 36, -35); fence(sc, 36, -38, 36, -42);
   fence(sc, 14, -32, 15, -32); fence(sc, 33, -32, 36, -32);
 }
-function festoons(sc) {
+function festoons(sc, skipTower) {
   // Power on: strings of warm bulbs over every zone.
   const runs = [[[15, 3.2, -32], [24, 5, -16]], [[33, 3.2, -32], [24, 5, -16]], [[24, 5, -16], [14, 3, -4]], [[24, 5, -16], [34, 3, -4]], [[6, 3, -6], [11, 3.5, -12]], [[38, 2.8, -4], [44, 2.8, -26]], [[37, 2.8, -36], [44, 6, -38]]];
-  for (const [a, b] of runs) {
+  for (const [a, b] of skipTower ? runs.slice(0, -1) : runs) {
     const A = V(...a), B = V(...b), n = 8;
     for (let i = 0; i < n; i++) {
       const p = lerp3(A, B, i / n), q = lerp3(A, B, (i + 1) / n);
@@ -270,7 +277,7 @@ function camp(sc, o = {}) {
   cabins(sc, { lit: true }); compound(sc, { lit: !o.onTop, onTop: o.onTop }); lake(sc); road(sc, o);
   // Woodpile in the woodpile gap.
   for (let i = 0; i < 4; i++) box(sc, 30.2, i * 0.3, -1.6 + i * 0.1, 32.8, i * 0.3 + 0.3, -0.5, '#5a3e28', { sub: 0.6 });
-  if (o.power) festoons(sc);
+  if (o.power) festoons(sc, o.onTop);
   // Moon, low in the east over the lake.
   light(sc, V(120, 60, -40), MOON, o.moon ?? 1.4, 200);
   if (o.forest !== false) forest(sc, o.forestOpts ?? {});
@@ -368,8 +375,9 @@ const views = {
     camp(sc, { power: true, onTop: true, forestOpts: { n: 160 } });
     for (const [x, z, f] of [[38, -28, 0.8], [40, -24.5, 0.8], [41.5, -27, 0.6], [44, -30, 1], [30, -20, 0.5], [27.5, -21.5, 0.4], [20, -12, 0.2], [36.5, -21, 0.7]]) robed(sc, x, 0, z, f, 0.25);
     player(sc, 25, 0, -18.5, 1, '#3a6ea5');
-    const cam = camera(V(45.5, 7.7, -39.2), V(28, 0, -15), 760, W, H, 1);
-    return render(sc, cam, crossbowModel() + prompt('Hunting crossbow', '1,500') + vignette(W, H, 0.7)) + caption('The watchtower', 'Six metres up, the whole camp below. One ladder, one at a time.');
+    const cam = camera(V(47.4, 7.8, -41.4), V(30, 0.5, -18), 700, W, H, 1);
+    const ammo = `<g font-family="Oswald" font-weight="600" text-anchor="end" style="paint-order:stroke" stroke="#000" stroke-width="4"><text x="1240" y="660" font-size="44" fill="#f2eee6">4 <tspan font-size="26" fill="#ff5a3a">/ 0</tspan></text><text x="1240" y="690" font-family="Inter" font-size="14" fill="#ff5a3a" stroke-width="3">No ammo up here</text></g>`;
+    return render(sc, cam, gunModel() + ammo + vignette(W, H, 0.7)) + caption('The watchtower', 'The whole camp below, but no ammo up here. Zombies broke the door at the bottom and are on the stairs.');
   },
 
   plan() {
@@ -389,7 +397,7 @@ const views = {
       g += `<rect x="${X(x0)}" y="${Y(z0)}" width="${(x1 - x0) * s}" height="${(z1 - z0) * s}" fill="${c}" fill-opacity=".55"/>`;
     }
     // Buildings.
-    const bld = [[15, -41.6, 33, -33, 'Mess hall'], [3, -26, 11, -14, 'Chapel'], [5, -29, 9, -26, ''], [38, -8, 44, -4, 'Cabin 3'], [38, -16, 44, -12, 'Cabin 2'], [38, -24, 44, -20, 'Cabin 1'], [43, -31, 47.4, -27, 'Boathouse'], [37, -41, 41, -36, ''], [43, -34.5, 46, -32.6, ''], [44.2, -41.8, 47.8, -38.2, '']];
+    const bld = [[15, -41.6, 33, -33, 'Mess hall'], [3, -26, 11, -14, 'Chapel'], [5, -29, 9, -26, ''], [38, -8, 44, -4, 'Cabin 3'], [38, -16, 44, -12, 'Cabin 2'], [38, -24, 44, -20, 'Cabin 1'], [43, -31, 47.4, -27, 'Boathouse'], [37, -41, 41, -36, ''], [43, -34.5, 46, -32.6, ''], [44.4, -42, 48, -38.4, 'Stairs']];
     for (const [x0, z0, x1, z1, n] of bld) g += `<rect x="${X(x0)}" y="${Y(z0)}" width="${(x1 - x0) * s}" height="${(z1 - z0) * s}" fill="#2a2016" stroke="#c8a878" stroke-width="1.5"/>` + (n ? `<text x="${X((x0 + x1) / 2)}" y="${Y((z0 + z1) / 2) + 4}" font-family="Inter" font-size="11" font-weight="600" fill="#e9dcc4" text-anchor="middle">${n}</text>` : '');
     // Palisade with gaps.
     const pal = (x0, z0, x1, z1) => `<line x1="${X(x0)}" y1="${Y(z0)}" x2="${X(x1)}" y2="${Y(z1)}" stroke="#8a6a44" stroke-width="7"/>`;
@@ -427,9 +435,9 @@ const views = {
     g += icon(5, -18, '#4ac0ff', 'Tough Juice', '');
     g += icon(7, -15, '#d0b060', 'Altar', '(secret)');
     g += icon(39, -10, '#e8b84a', 'Barnburner', '1200');
-    g += icon(38, -38.5, '#4ac0ff', 'Quick Hands', '', 'start');
+    g += icon(37.6, -37, '#4ac0ff', 'Quick Hands', '', 'start');
     g += icon(44.5, -33.5, '#ffe060', 'Power', '', 'start');
-    g += icon(46, -40, '#e8b84a', 'Crossbow', '1500', 'end');
+    g += icon(37.6, -40, '#e8b84a', 'Crossbow', '1500', 'start');
     // Zone letters.
     for (const [k, name, cost, x0, z0, x1, z1] of zones) {
       const cx = k === 'A' ? 19 : k === 'C' ? 7 : k === 'D' ? 41 : (x0 + x1) / 2;
@@ -439,7 +447,7 @@ const views = {
     // Zombie routes: arrows from the forest to each barricade.
     const arrow = (x0, z0, x1, z1) => `<line x1="${X(x0)}" y1="${Y(z0)}" x2="${X(x1)}" y2="${Y(z1)}" stroke="#ff5a3a" stroke-width="2" stroke-opacity=".8" marker-end="url(#ah)"/>`;
     g += `<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ff5a3a"/></marker></defs>`;
-    g += arrow(24, 9.5, 24, 1) + arrow(31.5, 6, 31.5, 1) + arrow(6.5, 6, 6.5, 1) + arrow(-9, -18.5, -1, -18.5) + arrow(30, -50, 30, -43) + arrow(42.7, -50, 42.7, -43) + arrow(60, -17.6, 49, -17.6) + arrow(58, -4.5, 49, -4.5);
+    g += arrow(24, 9.5, 24, 1) + arrow(31.5, 6, 31.5, 1) + arrow(6.5, 6, 6.5, 1) + arrow(-9, -18.5, -1, -18.5) + arrow(30, -50, 30, -43) + arrow(42.7, -50, 42.7, -43) + arrow(56, -40.3, 49, -40.3) + arrow(60, -17.6, 49, -17.6) + arrow(58, -4.5, 49, -4.5);
     // Legend and scale.
     const lg = [['#8a6a44', 'Palisade (3.2 m)'], ['#ff5a3a', 'Barricade'], ['#b89a70', 'Fence (1.2 m, shoot over)'], ['#e8b84a', 'Gate (door) and cost']];
     lg.forEach(([c, t], i) => (g += `<rect x="40" y="${60 + i * 26}" width="22" height="6" fill="${c}"/><text x="72" y="${67 + i * 26}" font-family="Inter" font-size="13" fill="#e9e2d6">${t}</text>`));
