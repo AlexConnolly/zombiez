@@ -37,6 +37,10 @@ const BLEED_TIME = 30;
 const REVIVE_TIME = 3;
 const REVIVE_RANGE = 1.5;
 const CRAWL = 1;
+/** Take-off speed: about a 1 m hop. */
+const JUMP_SPEED = 6.3;
+/** Every player's reward for a round in which no zombie pulled a single board. */
+export const CLEAN_ROUND_BONUS = 1000;
 export const GRACE_TIME = 60;
 
 export const zombieHp = (round: number) =>
@@ -58,10 +62,11 @@ export interface Command {
   reload: boolean;
   swap: boolean;
   melee: boolean;
+  jump: boolean;
   /** Online only: the server tick the client was showing when this command was made. Shots are checked against zombies as they were then. */
   view?: number;
 }
-export const NO_INPUT: Command = { fwd: 0, strafe: 0, yaw: 0, pitch: 0, sprint: false, fire: false, use: false, reload: false, swap: false, melee: false };
+export const NO_INPUT: Command = { fwd: 0, strafe: 0, yaw: 0, pitch: 0, sprint: false, fire: false, use: false, reload: false, swap: false, melee: false, jump: false };
 
 export type PowerupKind = 'maxAmmo' | 'instaKill' | 'doublePoints' | 'nuke';
 export const POWERUPS: PowerupKind[] = ['maxAmmo', 'instaKill', 'doublePoints', 'nuke'];
@@ -91,7 +96,8 @@ export type GameEvent =
   | { type: 'slide'; pid: string }
   | { type: 'link'; pid: string; to: number }
   | { type: 'secret'; pid: string; placed: number }
-  | { type: 'dawn'; pid: string };
+  | { type: 'dawn'; pid: string }
+  | { type: 'cleanRound'; round: number; points: number };
 
 export interface Player {
   id: string;
@@ -173,6 +179,8 @@ export interface Game {
   traps: Record<string, { cd: number; fuse: number }>;
   /** Seconds every zombie stays stopped (a bell). */
   frozen: number;
+  /** A zombie has pulled a board off this round. */
+  breached: boolean;
   /** The map's secret: hiding spots that still hold an item, items each player carries, items placed, players who took their reward. */
   secret: { spots: number[]; carried: Record<string, number>; placed: number; claimed: string[] };
 }
@@ -238,6 +246,7 @@ export class Sim {
       nextId: 1,
       traps: Object.fromEntries((map.traps ?? []).map((t) => [t.id, { cd: 0, fuse: 0 }])),
       frozen: 0,
+      breached: false,
       secret: { spots: [], carried: {}, placed: 0, claimed: [] },
     };
     this.state = s;
@@ -897,6 +906,7 @@ export class Sim {
       s.toSpawn = zombieCount(s.round, this.activeCount());
       s.spawnT = 1;
       s.drops = 0;
+      s.breached = false;
       s.players.forEach((p, i) => {
         p.boardPts = 0;
         if (p.connected && (p.status === 'dead' || p.status === 'away')) this.respawn(p, i);
@@ -914,6 +924,10 @@ export class Sim {
       s.phase = 'break';
       s.phaseT = 10;
       this.events.push({ type: 'roundEnd', round: s.round });
+      if (!s.breached) {
+        for (const p of s.players) if (p.connected && p.status !== 'left' && p.status !== 'away') this.award(p, CLEAN_ROUND_BONUS);
+        this.events.push({ type: 'cleanRound', round: s.round, points: CLEAN_ROUND_BONUS });
+      }
     }
   }
 
@@ -1011,6 +1025,7 @@ export class Sim {
         if (ws.tearT >= TEAR_TIME) {
           ws.tearT = 0;
           ws.boards--;
+          s.breached = true;
           this.events.push({ type: 'board', window: z.window, boards: ws.boards, torn: true });
         }
         return;
@@ -1234,6 +1249,7 @@ export function movePlayer(p: Pick<Player, 'pos' | 'vy' | 'onGround' | 'yaw' | '
   const len = Math.hypot(f, r);
   if (len > 1) { f /= len; r /= len; }
   const speed = (down ? CRAWL : c.sprint && f > 0 ? SPRINT : WALK) * TICK;
+  if (c.jump && p.onGround && !down) { p.vy = JUMP_SPEED; p.onGround = false; }
   const sin = Math.sin(p.yaw);
   const cos = Math.cos(p.yaw);
   moveBody(p, (-sin * f + cos * r) * speed, (-cos * f - sin * r) * speed, TICK, PLAYER_HW, PLAYER_H, world.body());

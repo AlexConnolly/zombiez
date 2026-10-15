@@ -156,6 +156,7 @@ function sanitize(c: Command): Command {
     reload: !!c.reload,
     swap: !!c.swap,
     melee: !!c.melee,
+    jump: !!c.jump,
     view: typeof c.view === 'number' && Number.isFinite(c.view) ? c.view : undefined,
   };
 }

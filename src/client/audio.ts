@@ -296,6 +296,9 @@ export class Sound {
           } else if (!e.fire) { this.tone(1800, 0.05, 'square', { gain: 0.2 }); this.hiss(1, 'highpass', 2500, { gain: 0.5, attack: 0.1 }); }
           else { this.hiss(1.8, 'lowpass', 1200, { gain: 1.8, to: 90, attack: 0.02 }); this.tone(50, 1.2, 'sine', { gain: 1.4, to: 28 }); }
           break;
+        case 'cleanRound':
+          for (const [f, d] of [[659, 0], [784, 0.12], [1047, 0.24]] as const) this.tone(f, 0.6, 'triangle', { gain: 0.25, delay: d });
+          break;
         case 'dawn':
           for (const [f, d] of [[262, 0], [330, 0.3], [392, 0.6], [523, 0.9]] as const) this.tone(f, 3, 'sine', { gain: 0.25, delay: d, attack: 0.4 });
           break;

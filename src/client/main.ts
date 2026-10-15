@@ -90,6 +90,8 @@ addEventListener('keydown', (e) => {
   // Browser shortcuts (save, print, find...) open dialogs that steal the mouse mid-game.
   if (app === 'playing' && (e.ctrlKey || e.metaKey) && e.code !== 'KeyW') e.preventDefault();
   if (e.ctrlKey || e.metaKey) return;
+  // Space jumps; it must not also press a focused button or scroll the page.
+  if (app === 'playing' && e.code === 'Space') e.preventDefault();
   keys.add(e.code);
   if (app === 'playing' && ['Digit1', 'Digit2'].includes(e.code)) {
     const me = sim.player(localId);
@@ -141,6 +143,7 @@ function command(): Command {
     reload: k('KeyR'),
     swap: k('KeyQ') || swapPulse,
     melee: k('KeyV') || k('KeyF'),
+    jump: k('Space'),
   };
   swapPulse = false;
   return c;
@@ -481,6 +484,7 @@ function hudEvents(evs: GameEvent[]) {
     }
     if (e.type === 'roundStart') { hud.round.classList.remove('flash'); void hud.round.offsetWidth; hud.round.classList.add('flash'); }
     if (e.type === 'roundEnd') banner(`Round ${e.round} survived`);
+    if (e.type === 'cleanRound') banner(`Clean round! +${e.points.toLocaleString()} to everyone`);
     if (e.type === 'powerup') banner(PU_NAMES[e.kind]);
     if (e.type === 'power') banner('Power on');
     if (e.type === 'secret' && sim.map.secret) {

@@ -342,3 +342,74 @@ describe('determinism', () => {
     expect(play(43)).not.toBe(a);
   });
 });
+
+describe('clean round', () => {
+  /** A round that is about to end: 1 zombie left, nothing more to spawn. */
+  function lastZombie(sim: Sim) {
+    sim.state.phase = 'active';
+    sim.state.round = 3;
+    sim.state.toSpawn = 0;
+    return sim.spawnZombie();
+  }
+
+  it('no board pulled all round: everyone gets 1000 and a "clean round"', () => {
+    const sim = quiet();
+    const p = sim.state.players[0];
+    sim.state.breached = false;
+    const z = lastZombie(sim);
+    sim.state.zombies = sim.state.zombies.filter((o) => o !== z);
+    const evs = run(sim, TICK);
+    expect(evs).toContainEqual({ type: 'cleanRound', round: 3, points: 1000 });
+    expect(p.points).toBe(1500);
+  });
+
+  it('one board pulled: no bonus', () => {
+    const sim = quiet();
+    const p = sim.state.players[0];
+    p.hp = p.maxHp = 1e9;
+    const z = lastZombie(sim);
+    run(sim, 30);
+    expect(sim.state.breached).toBe(true);
+    sim.state.zombies = sim.state.zombies.filter((o) => o !== z);
+    const evs = run(sim, TICK);
+    expect(evs.some((e) => e.type === 'roundEnd')).toBe(true);
+    expect(evs.some((e) => e.type === 'cleanRound')).toBe(false);
+    expect(p.points).toBe(500);
+  });
+
+  it('a new round starts clean', () => {
+    const sim = new Sim(map, 1);
+    sim.state.breached = true;
+    run(sim, 3.1);
+    expect(sim.state.round).toBe(1);
+    expect(sim.state.breached).toBe(false);
+  });
+});
+
+describe('jump', () => {
+  it('space lifts the player about a metre, they can steer in the air, and they land', () => {
+    const sim = quiet();
+    const p = sim.state.players[0];
+    run(sim, 0.5);
+    const y0 = p.pos.y, x0 = p.pos.x, z0 = p.pos.z;
+    let top = y0;
+    for (let i = 0; i < 20; i++) { run(sim, TICK, { jump: i === 0, strafe: 1 }); top = Math.max(top, p.pos.y); }
+    expect(top - y0).toBeGreaterThan(0.8);
+    expect(top - y0).toBeLessThan(1.3);
+    expect(Math.hypot(p.pos.x - x0, p.pos.z - z0)).toBeGreaterThan(1);
+    run(sim, 1);
+    expect(p.pos.y).toBeCloseTo(y0, 3);
+    expect(p.onGround).toBe(true);
+  });
+
+  it('no jumping while down', () => {
+    const sim = quiet();
+    const p = sim.state.players[0];
+    run(sim, 0.5);
+    p.status = 'down';
+    p.bleedT = 30;
+    const y0 = p.pos.y;
+    run(sim, 0.3, { jump: true });
+    expect(p.pos.y).toBeCloseTo(y0, 3);
+  });
+});
