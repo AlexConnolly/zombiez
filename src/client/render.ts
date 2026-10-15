@@ -49,6 +49,23 @@ function tex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) 
   return t;
 }
 
+/** Horizontal logs for cabin walls: about eight courses over a wall's height. */
+let logTex: THREE.Texture | null = null;
+function logTexture() {
+  logTex ??= tex(64, 256, (g) => {
+    for (let i = 0; i < 8; i++) {
+      const y = i * 32;
+      const grad = g.createLinearGradient(0, y, 0, y + 32);
+      grad.addColorStop(0, '#5a4634'); grad.addColorStop(0.5, '#8a7056'); grad.addColorStop(1, '#4a3828');
+      g.fillStyle = grad;
+      g.fillRect(0, y, 64, 32);
+      g.fillStyle = '#1a120c';
+      g.fillRect(0, y + 30, 64, 2);
+    }
+  });
+  return logTex;
+}
+
 function boxMesh(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(UNIT, mat);
   m.scale.set(w, h, d);
@@ -179,6 +196,7 @@ export class Renderer {
   private center = new THREE.Vector3(7, 1.5, 8);
   private trapFx = new Map<string, THREE.PointLight>();
   private fires = new Set<string>();
+  private flames: THREE.Mesh[] = [];
   private books: THREE.Mesh[] = [];
   private hatch = new THREE.Group();
   private recoil = 0;
@@ -358,6 +376,9 @@ export class Renderer {
       }
       if (p.kind === 'minibus') {
         grp.add(boxMesh(2.2, 2.2, 6, lamC(col || 0xc8c4b8), 0, 1.4, 0), boxMesh(2.1, 0.7, 0.05, basic(0x0a0c10), 0, 2, -3.01));
+        // Side windows, a stripe, the open driver's door.
+        for (const side of [-1, 1]) grp.add(boxMesh(0.04, 0.6, 4.8, basic(0x0e1218), side * 1.11, 1.95, 0.3), boxMesh(0.04, 0.15, 6, lamC(0x8a2a1a), side * 1.11, 1.05, 0));
+        grp.add(boxMesh(0.06, 1.6, 0.9, lamC(col || 0xc8c4b8), -1.5, 1.2, -2.1).rotateY(-0.9));
         for (const [x, z] of [[-1, 2], [1, 2], [-1, -2], [1, -2]]) grp.add(boxMesh(0.25, 0.7, 0.7, lamC(0x0c0c0c), x, 0.35, z));
         for (const x of [-0.75, 0.75]) grp.add(boxMesh(0.3, 0.2, 0.05, basic(0xfff6e0), x, 0.9, -3.01));
         const beam = new THREE.SpotLight(0xf4f0ff, 40, 30, 0.45, 0.5, 1.2);
@@ -365,7 +386,31 @@ export class Renderer {
         beam.target.position.set(0, 0, -20);
         grp.add(beam, beam.target);
       }
-      if (p.kind === 'totem') grp.add(boxMesh(0.8, h, 0.8, lamC(0x5a4028), 0, h / 2, 0), boxMesh(1.6, 1.6, 0.3, lamC(0xb8902a), 0, h + 0.8, 0));
+      if (p.kind === 'totem') {
+        // Carved blocks, each a little wider or narrower, under a gold sun.
+        const bands = [0x4a3422, 0x6a4a2a, 0x3a2818, 0x5a3e24];
+        for (let i = 0; i < 4; i++) grp.add(boxMesh(0.75 + (i % 2) * 0.2, h / 4, 0.75 + (i % 2) * 0.2, lamC(bands[i]), 0, (h / 4) * (i + 0.5), 0));
+        grp.add(boxMesh(0.12, 0.12, 0.05, basic(0xe8c060), -0.15, h * 0.62, 0.48), boxMesh(0.12, 0.12, 0.05, basic(0xe8c060), 0.15, h * 0.62, 0.48));
+        const sun = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.12, 20), new THREE.MeshLambertMaterial({ color: 0xc8962a, emissive: 0x3a2808 }));
+        sun.rotation.x = Math.PI / 2;
+        sun.position.y = h + 0.7;
+        grp.add(sun);
+      }
+      if (p.kind === 'pane') {
+        // A lit window: warm glass in a dark frame, facing +z before rot.
+        grp.add(boxMesh(w + 0.16, h + 0.16, 0.06, lamC(0x1e140c), 0, 0, 0), boxMesh(w, h, 0.08, basic(col || 0xffc070), 0, 0, 0), boxMesh(0.05, h, 0.1, lamC(0x1e140c), 0, 0, 0));
+      }
+      if (p.kind === 'log') {
+        const log = new THREE.Mesh(new THREE.CylinderGeometry(h / 2, h / 2, w, 9), lamC(col || 0x3a281a));
+        log.rotation.z = Math.PI / 2;
+        log.position.y = h / 2;
+        grp.add(log);
+      }
+      if (p.kind === 'dirt') {
+        const disc = new THREE.Mesh(new THREE.CylinderGeometry(w / 2, w / 2, 0.02, 28), lamC(col || 0x3a3024));
+        disc.position.y = 0.01;
+        grp.add(disc);
+      }
       if (p.kind === 'bin') grp.add(boxMesh(0.6, 1.05, 0.7, lamC(col || 0x1c1e22), 0, 0.53, 0), boxMesh(0.64, 0.06, 0.74, lamC(0x101010), 0, 1.08, 0));
       if (p.kind === 'railing') {
         // Black iron railings: a top bar and posts every 15 cm along the long side.
@@ -432,6 +477,42 @@ export class Renderer {
     for (const x of [x0 + 0.5, x1 - 0.5]) this.level.add(boxMesh(1, 2.2, 2, lamC(0x4e3226), x, r.ridge + 1, (z0 + z1) / 2));
   }
 
+  /** Three pointed upright logs per wall tile, each a little different in height and shade. */
+  private stockade(tiles: { x: number; z: number; y: number; h: number; along: 'x' | 'z' }[]) {
+    const n = tiles.length * 3;
+    const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.19, 0.2, 1, 7), lamC(0xffffff), n);
+    const tips = new THREE.InstancedMesh(new THREE.ConeGeometry(0.19, 0.45, 7), lamC(0xffffff), n);
+    const m = new THREE.Matrix4(), col = new THREE.Color();
+    let i = 0;
+    for (const t of tiles)
+      for (const o of [1 / 6, 0.5, 5 / 6]) {
+        const x = t.along === 'x' ? t.x + o : t.x + 0.5, z = t.along === 'z' ? t.z + o : t.z + 0.5;
+        const r = Math.sin(x * 91.7 + z * 47.3) * 43758.5453, k = r - Math.floor(r);
+        const h = t.h + k * 0.5;
+        m.makeScale(1, h + 0.2, 1).setPosition(x, t.y - 0.2 + (h + 0.2) / 2, z);
+        trunks.setMatrixAt(i, m);
+        m.makeTranslation(x, t.y + h + 0.22, z);
+        tips.setMatrixAt(i, m);
+        col.setHex(0x5a4430).multiplyScalar(0.8 + k * 0.4);
+        trunks.setColorAt(i, col);
+        tips.setColorAt(i, col.multiplyScalar(0.85));
+        i++;
+      }
+    this.level.add(trunks, tips);
+  }
+
+  /** A clear night: stars over the forest. */
+  private stars() {
+    const n = 900, pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, e = 0.12 + Math.random() * 1.3;
+      pos.set([Math.cos(a) * Math.cos(e) * 160 + 25, Math.sin(e) * 160, Math.sin(a) * Math.cos(e) * 160 + 22], i * 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.level.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xdfe6ff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 })));
+  }
+
   load(sim: Sim) {
     this.sim = sim;
     const map = sim.map;
@@ -494,7 +575,24 @@ export class Renderer {
         }
       }));
     });
-    const all = [...rb, ...skins];
+    // In the forest, walls are logs: the outer ring is a stockade of pointed uprights, the rest horizontal log walls.
+    const logWalls: typeof rb = [];
+    const stockade: { x: number; z: number; y: number; h: number; along: 'x' | 'z' }[] = [];
+    if (forest) {
+      const W = map.floors[0].tiles[0].length, D = map.floors[0].tiles.length;
+      for (let i = rb.length - 1; i >= 0; i--) {
+        const r = rb[i];
+        if (r.kind !== 'wall' || !map.floors[r.fi]?.open) continue;
+        rb.splice(i, 1);
+        const x = Math.floor(r.box.min.x + 0.01), z = Math.floor(r.box.min.z + 0.01);
+        const edge = x === 0 || z === 0 || x === W - 1 || z === D - 1;
+        const full = r.box.max.x - r.box.min.x > 0.9 && r.box.max.z - r.box.min.z > 0.9 && r.box.max.y - r.box.min.y > floorHeight(map, r.fi);
+        if (edge && full) stockade.push({ x, z, y: map.floors[r.fi].y, h: floorHeight(map, r.fi), along: z === 0 || z === D - 1 ? 'x' : 'z' });
+        else logWalls.push(r);
+      }
+      this.stockade(stockade);
+    }
+    const all = [...rb, ...(forest ? [] : skins)];
     const inst = new THREE.InstancedMesh(UNIT, new THREE.MeshLambertMaterial(), all.length);
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
@@ -514,6 +612,18 @@ export class Renderer {
       inst.setColorAt(i, col);
     });
     this.level.add(inst);
+    if (logWalls.length) {
+      const logs = new THREE.InstancedMesh(UNIT, new THREE.MeshLambertMaterial({ map: logTexture() }), logWalls.length);
+      logWalls.forEach(({ box: b }, i) => {
+        m.makeScale(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
+        m.setPosition((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2);
+        logs.setMatrixAt(i, m);
+        const n = Math.sin(b.min.x * 12.9898 + b.min.z * 78.233) * 43758.5453;
+        logs.setColorAt(i, col.setHex(0x9a8068).multiplyScalar(0.9 + (n - Math.floor(n)) * 0.2));
+      });
+      this.level.add(logs);
+    }
+    if (forest) this.stars();
 
     const plank = lam(C.wood);
     for (const w of map.windows) {
@@ -631,12 +741,14 @@ export class Renderer {
       const light = new THREE.PointLight(C.lamp, 9, 11, 1.6);
       light.position.set(p.x, top - 0.7, p.z);
       this.lamps.push(light);
-      const rod = map.floors[floorIndex(map, l.floor)].open ? boxMesh(0.1, top - 0.55 - p.y, 0.1, lamC(0x2a1d14), p.x, (p.y + top - 0.55) / 2, p.z) : boxMesh(0.02, 0.5, 0.02, lam(0x111111), p.x, top - 0.25, p.z);
+      const covered = (map.props ?? []).some((q) => q.kind === 'roof' && Math.abs(q.pos[0] - p.x) < (q.size?.[0] ?? 0) / 2 && Math.abs(q.pos[2] - p.z) < (q.size?.[2] ?? 0) / 2);
+      const rod = map.floors[floorIndex(map, l.floor)].open && !covered ? boxMesh(0.1, top - 0.55 - p.y, 0.1, lamC(0x2a1d14), p.x, (p.y + top - 0.55) / 2, p.z) : boxMesh(0.02, 0.5, 0.02, lam(0x111111), p.x, top - 0.25, p.z);
       this.level.add(light, rod, boxMesh(0.1, 0.12, 0.1, new THREE.MeshBasicMaterial({ color: 0xffd9a0 }), p.x, top - 0.55, p.z));
     }
 
     this.trapFx.clear();
     this.fires.clear();
+    this.flames = [];
     for (const t of map.traps ?? []) {
       const p = placedPos(map, t);
       const light = new THREE.PointLight(0x4a8cff, 0, 14, 1.5);
@@ -646,7 +758,13 @@ export class Renderer {
         const c = { x: (t.box.min[0] + t.box.max[0]) / 2, y: p.y, z: (t.box.min[2] + t.box.max[2]) / 2 };
         for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; this.level.add(boxMesh(0.35, 0.3, 0.35, lamC(0x55524c), c.x + Math.cos(a) * 1.3, c.y + 0.15, c.z + Math.sin(a) * 1.3)); }
         this.level.add(boxMesh(1.8, 0.12, 1.8, basic(0xff5a1a), c.x, c.y + 0.06, c.z), boxMesh(1.6, 0.25, 0.3, lamC(0x1e1612), c.x, c.y + 0.2, c.z), boxMesh(0.3, 0.3, 1.6, lamC(0x2a1a10), c.x, c.y + 0.25, c.z));
-        this.level.add(boxMesh(0.3, 0.45, 0.2, lamC(0x8a2a1a), p.x, p.y + 0.22, p.z));
+        this.level.add(boxMesh(0.22, 0.34, 0.16, lamC(0x4a1a12), p.x, p.y + 0.17, p.z));
+        for (let i = 0; i < 4; i++) {
+          const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35 - i * 0.05, 1, 6), new THREE.MeshBasicMaterial({ color: i % 2 ? 0xffc040 : 0xff7020, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
+          flame.position.set(c.x + Math.cos(i * 1.7) * 0.3, c.y + 0.6, c.z + Math.sin(i * 1.7) * 0.3);
+          this.flames.push(flame);
+          this.level.add(flame);
+        }
         light.color.setHex(0xff7a2a);
         light.position.set(c.x, c.y + 1, c.z);
         light.distance = 26;
@@ -937,9 +1055,12 @@ export class Renderer {
       else l.intensity = Math.max(rest, l.intensity - dt * 40);
       if (fire && l.intensity <= rest) l.color.setHex(0xff7a2a);
     }
-    // In the forest the lamps are festoon bulbs on the generator: dark until the power is on.
-    const lampOn = this.sim.map.ambience !== 'forest' || s.power;
-    this.lamps.forEach((l, i) => (l.intensity = !lampOn ? 0 : i === 1 ? 9 * (0.75 + 0.25 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3)) : 9));
+    this.lamps.forEach((l, i) => (l.intensity = i === 1 ? 9 * (0.75 + 0.25 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3)) : 9));
+    this.flames.forEach((f, i) => {
+      const k = 0.75 + 0.35 * Math.sin(this.time * (9 + i * 2.3) + i) * Math.sin(this.time * (5.1 + i));
+      f.scale.set(1, 0.8 + k * 0.7, 1);
+      f.position.y = this.sim.map.floors[0].y + (0.8 + k * 0.7) / 2;
+    });
 
     // Zombies.
     const seen = new Set<number>();

@@ -105,8 +105,14 @@ for a in (0.3, 1.0, 2.15, 2.85, 3.6, 5.8):
     props.append({'kind': 'tent', 'pos': [round(x, 1), 0, round(z, 1)], 'size': [2.4, 1.5, 2.2], 'rot': round(-a - math.pi / 2, 2), 'color': ['#5e5e44', '#5a4a3a', '#4a5a5a'][round(a * 3) % 3]})
 for i in range(8):
     a = i / 8 * math.pi * 2 + math.pi / 8
-    props.append({'kind': 'box', 'pos': [round(25 + math.cos(a) * 4.2, 2), 0, round(27 + math.sin(a) * 4.2, 2)], 'size': [2, 0.45, 0.5], 'rot': round(-a + math.pi / 2, 2), 'color': '#4a3322'})
+    props.append({'kind': 'log', 'pos': [round(25 + math.cos(a) * 4.2, 2), 0, round(27 + math.sin(a) * 4.2, 2)], 'size': [2, 0.45, 0.45], 'rot': round(-a + math.pi / 2, 2)})
+# Lit windows on the outside walls: [x, z, rot].
+panes = [[x, 11.04, 0] for x in (18.5, 21.5, 29.5, 32.5)] + [[13.04, z, math.pi / 2] for z in (19.5, 27.5)] + [[41.8, 8.04, 0]]
+for z0 in (19, 27, 35): panes += [[38.96, z0 + 1.2, -math.pi / 2], [38.96, z0 + 3.8, -math.pi / 2], [46.04, z0 + 2.5, math.pi / 2]]
+props += [{'kind': 'pane', 'pos': [x, 1.8, z], 'size': [1, 0.8, 0], 'rot': round(rot, 3)} for x, z, rot in panes]
 props += [
+    {'kind': 'dirt', 'pos': [25, 0, 27], 'size': [15, 0, 15]},
+    {'kind': 'box', 'pos': [25, 0, 38.5], 'size': [3.5, 0.015, 9], 'color': '#3a3024'},  # trodden path to the gate
     {'kind': 'totem', 'pos': [25.5, 0, 19.5], 'size': [1, 3.6, 1]},
     {'kind': 'roof', 'pos': [26, GROUND_H, 5.5], 'size': [20, 2.2, 11]},
     {'kind': 'roof', 'pos': [8.5, GROUND_H, 23.5], 'size': [9, 3, 13], 'color': '#2e2a26'},
@@ -123,7 +129,8 @@ props += [
     {'kind': 'box', 'pos': [58, -0.15, 22], 'size': [3.5, 0.4, 1], 'color': '#6a3a2a'},  # rowing boat
     # Tables set for a meal that never finished.
     *[{'kind': 'box', 'pos': [22.5, 0, z], 'size': [11, 0.8, 1], 'color': '#6a4a30'} for z in (4, 7)],
-    *[{'kind': 'box', 'pos': [x, 0.8, z + dz], 'size': [0.36, 0.06, 0.36], 'color': '#d8d4c8'} for z in (4, 7) for dz in (-0.3, 0.3) for x in range(18, 28, 2)],
+    *[{'kind': 'box', 'pos': [x, 0.8, z + dz], 'size': [0.26, 0.03, 0.26], 'color': '#9a9488'} for z in (4, 7) for dz in (-0.28, 0.28) for x in range(18, 28, 2)],
+    *[{'kind': 'box', 'pos': [x, 0.83, z + dz], 'size': [0.16, 0.01, 0.16], 'color': '#5a2e18'} for z in (4, 7) for dz in (-0.28, 0.28) for x in range(18, 28, 2)],  # stew
     {'kind': 'box', 'pos': [31, 0, 1.5], 'size': [4.5, 0.95, 0.9], 'color': '#3a3a3a'},  # stove
     *[{'kind': 'box', 'pos': [8.5, 0, z], 'size': [5, 0.5, 0.5], 'color': '#4a3322'} for z in (21, 24, 27)],  # pews
     {'kind': 'box', 'pos': [39.5, 0, 9.3], 'size': [2.6, 2.2, 1.2], 'color': '#3e3a34'},  # generator shed
@@ -153,7 +160,7 @@ camp = {
     'boxSpots': [P(27, 4, zone='B'), P(6, 20, zone='C'), P(43, 29, zone='D'), P(41, 4, zone='E')],
     'perks': [P(6, 27, perk='tough'), P(38, 3, perk='quick')],
     'power': P(36, 9, facing='w'),
-    'lamps': [P(20, 20), P(30, 20), P(20, 34), P(30, 34), P(7, 36), P(37, 20), P(37, 10), P(17, 5)],
+    'lamps': [P(20, 20), P(30, 34), P(7, 36), P(37, 20), P(37, 10), P(21, 5), P(30, 5), P(8, 25), P(42, 29), P(40, 5)],
     'ambience': 'forest', 'zombieSkin': 'robe',
     'ground': ground, 'props': props, 'traps': traps,
     'secret': {'spots': secret_spots, 'count': 3, 'drop': P(7, 23), 'reward': 'dawn'},
