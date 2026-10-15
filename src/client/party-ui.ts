@@ -8,6 +8,7 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySe
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 /** How long a guest waits to hear from the host before giving up. */
 const JOIN_TIMEOUT = 45_000;
+const RETRY_MS = 8_000;
 
 /**
  * Host and Join screens for peer-to-peer play. When the match starts it hands the game a NetClient,
@@ -63,15 +64,23 @@ export function initPartyUi(o: {
     if (raw.length !== 12) return err('Codes are 12 characters, like ABCD-EFGH-JKMN.');
     close();
     code = `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8)}`;
-    const g = new PartyGuest(partyRoom(code), name(), mapById, () => onGuest(g));
-    guest = g;
+    const until = Date.now() + JOIN_TIMEOUT;
+    // Public trackers sometimes drop an introduction: if the host has not answered, join again for a fresh one.
+    const attempt = () => {
+      const g = new PartyGuest(partyRoom(code), name(), mapById, () => onGuest(g));
+      guest = g;
+      joinTimer = setTimeout(() => {
+        if (guest !== g || g.names.length || g.net) return;
+        g.close();
+        if (Date.now() < until) return attempt();
+        guest = null;
+        open(code);
+        err('Could not reach the host. Check the code, and that the host still has the game open.');
+      }, RETRY_MS);
+    };
+    attempt();
     render();
     o.show('menu-party-lobby');
-    joinTimer = setTimeout(() => {
-      if (guest !== g || g.names.length) return;
-      open(code);
-      err('Could not reach the host. Check the code, and that the host still has the game open.');
-    }, JOIN_TIMEOUT);
   });
 
   function onGuest(g: PartyGuest) {
