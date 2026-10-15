@@ -75,7 +75,7 @@ export function initPartyUi(o: {
         if (Date.now() < until) return attempt();
         guest = null;
         open(code);
-        err('Could not reach the host. Check the code, and that the host still has the game open.');
+        err('Could not reach the host. Check the code and that the host still has the game open. Two tabs on one computer cannot connect to each other: use two devices.');
       }, RETRY_MS);
     };
     attempt();
