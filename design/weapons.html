@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; font-family: Inter, sans-serif; }
+  .view { display: none; position: relative; }
+  .view.on { display: block; }
+  .cap { position: absolute; left: 28px; bottom: 22px; font: 600 15px Inter; color: #e9e2d6; text-shadow: 0 2px 8px #000; letter-spacing: .02em; }
+  .cap b { font: 600 22px Oswald; letter-spacing: .06em; text-transform: uppercase; display: block; color: #fff; }
+</style>
+</head>
+<body>
+<div class="view" id="blowtorch"></div>
+<div class="view" id="grinder"></div>
+<div class="view" id="sentry"></div>
+<script src="r3d.js"></script>
+<script src="campsite-scene.js"></script>
+<script>
+// Concept renders for the new weapons, set in Camp Morrow (same coordinates as campsite.html).
+const night = (o = {}) => Scene({ ...S1, ambient: [0.035, 0.04, 0.055], exposure: o.exposure ?? 1.3, fog: { c: [0.02, 0.025, 0.04], start: 22, end: 70, max: 0.85 }, sky: (cam) => SKY(cam) + stars(120), ...o });
+const hudText = (x, y, big, small, color = '#f2eee6') => `<g font-family="Oswald" font-weight="600" text-anchor="end" style="paint-order:stroke" stroke="#000" stroke-width="4"><text x="${x}" y="${y}" font-size="40" fill="${color}">${big}</text><text x="${x}" y="${y + 24}" font-family="Inter" font-size="14" fill="#e9e2d6" stroke-width="3">${small}</text></g>`;
+
+const views = {
+  blowtorch() {
+    const sc = night({ exposure: 1.0 });
+    camp(sc, { forestOpts: { n: 140 } });
+    // Three robed zombies alight in a 6 m cone; one at the edge just catching.
+    for (const [x, z, f] of [[23.2, -29.4, 0.1], [24.9, -30.2, -0.2], [24.1, -31.8, 0]]) {
+      robed(sc, x, 0, z, f, 0.35);
+      for (let i = 0; i < 6; i++) glow(sc, V(x + Math.sin(i * 2.1) * 0.25, 0.3 + i * 0.32, z + Math.cos(i * 1.7) * 0.2), i % 2 ? '#ffb040' : '#ff5a10', 0.38 - i * 0.03, 0.8);
+    }
+    robed(sc, 21.5, 0, -33, 0.4, 0.2);
+    // The jet: a widening stream of flame from the nozzle to the targets.
+    for (let i = 0; i < 18; i++) {
+      const k = i / 17;
+      glow(sc, V(22.75 + k * 1.4 + Math.sin(i) * 0.15 * k, 1.25 - k * 0.45, -26.1 - k * 4.6), k < 0.3 ? '#ffe8b0' : i % 2 ? '#ff5a10' : '#ffa030', 0.12 + k * 0.7, 0.85);
+    }
+    light(sc, V(24, 1, -29.5), '#ff7a20', 2.2, 3);
+    light(sc, V(24.2, 1.2, -26.5), '#ffb060', 0.8, 1.5);
+    const cam = camera(V(22.4, 1.7, -25.2), V(24.4, 1.0, -31), 700, W, H, 1);
+    const torch = `<g><polygon points="760,720 800,600 1010,560 1100,720" fill="#3a2a1c"/><polygon points="800,600 1010,560 1030,600 830,640" fill="#5a4a3a"/><rect x="1010" y="610" width="120" height="110" rx="18" fill="#7a2a1a"/><rect x="1020" y="620" width="100" height="18" fill="#9a3a22"/><polygon points="700,610 820,592 826,612 706,630" fill="#1b1c1f"/><circle cx="700" cy="620" r="14" fill="#ffd080" opacity=".9"/></g>`;
+    return render(sc, cam, torch + hudText(1240, 640, '72 <tspan font-size="24" fill="#e8b84a">FUEL</tspan>', 'Blowtorch · burning spreads on touch') + vignette(W, H, 0.8)) + caption('Blowtorch', 'A 6 m cone. Burning zombies set alight the ones they touch. Great when cornered, useless at range.');
+  },
+
+  grinder() {
+    const sc = night();
+    camp(sc, { forestOpts: { n: 160 } });
+    // The gate has given way: a crowd pours in towards the fire.
+    for (const [x, z, f] of [[22.2, -2.2, Math.PI], [24, -3, Math.PI + 0.1], [25.8, -2.4, Math.PI - 0.1], [23.1, -1.2, Math.PI], [26.6, -1, Math.PI], [24.6, -0.6, Math.PI], [21.2, -0.4, Math.PI + 0.2]]) robed(sc, x, 0, z, f, 0.3);
+    const muzzle = V(24.25, 1.35, -7.9);
+    for (const [x, z] of [[24, -3], [22.2, -2.2], [25.8, -2.4], [23.1, -1.2], [26.6, -1]]) line3(sc, muzzle, V(x, 1.1, z), '#ffe2a0', 2, 0.7);
+    light(sc, V(24.2, 1.4, -8.3), '#ffd29a', 6, 4);
+    glow(sc, V(24.25, 1.35, -8), '#fff0c0', 0.5, 0.9);
+    const cam = camera(V(24, 1.6, -9.2), V(24, 1.2, 0), 640, W, H, 1);
+    const gun = `<g><polygon points="560,720 620,560 900,540 980,720" fill="#26282b"/><rect x="600" y="520" width="280" height="70" rx="12" fill="#323438"/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="${610 + i * 9}" y="${470 - i * 4}" width="10" height="90" fill="#1b1c1f" transform="rotate(-8 640 520)"/>`).join('')}<rect x="900" y="560" width="70" height="60" rx="6" fill="#4a4030"/></g>`;
+    const arc = `<g fill="none" stroke="#e8b84a" stroke-width="3" opacity=".9"><path d="M 560 120 A 120 120 0 0 1 720 120"/><path d="M 552 112 l 8 8 l 8 -8" /><path d="M 712 112 l 8 8 l 8 -8" /></g><text x="640" y="104" text-anchor="middle" font-family="Inter" font-weight="600" font-size="14" fill="#e8b84a" style="paint-order:stroke" stroke="#000" stroke-width="3">HEAVY · TURN 90°/S · NO SPRINT</text>`;
+    return render(sc, cam, gun + arc + hudText(1240, 640, '214 <tspan font-size="24" fill="#8a8478">/ 300</tspan>', 'Grinder · spun up') + vignette(W, H, 0.8)) + caption('Grinder', '20 rounds a second down a crowded line. You turn slowly while it is out: deadly ahead, helpless behind.');
+  },
+
+  sentry() {
+    const sc = night();
+    camp(sc, { forestOpts: { n: 160 } });
+    // A tripod turret facing the woodpile gap, firing at zombies coming through it.
+    const tx = 30.5, tz = -5;
+    for (const [dx, dz] of [[-0.5, 0.4], [0.5, 0.4], [0, -0.6]]) line3(sc, V(tx + dx, 0, tz + dz), V(tx, 0.9, tz), '#3a3a3a', 4);
+    box(sc, tx - 0.3, 0.9, tz - 0.3, tx + 0.3, 1.3, tz + 0.3, '#4a5040', { sub: 0.2 });
+    box(sc, tx - 0.05, 1.05, tz + 0.3, tx + 0.05, 1.15, tz + 1.2, '#1b1c1f', { sub: 0.2 });
+    box(sc, tx - 0.32, 1.15, tz - 0.32, tx - 0.22, 1.25, tz - 0.22, '#ff3020', { emissive: 2 });
+    glow(sc, V(tx, 1.1, tz + 1.25), '#fff0c0', 0.35, 0.9);
+    light(sc, V(tx, 1.2, tz + 1), '#ffd29a', 3, 3);
+    for (const [x, z, f] of [[31.3, -2.6, Math.PI], [32.4, -2.1, Math.PI + 0.2], [30.3, -3, Math.PI - 0.1]]) { robed(sc, x, 0, z, f, 0.3); line3(sc, V(tx, 1.1, tz + 1.2), V(x, 1.2, z), '#ffe2a0', 2, 0.75); }
+    player(sc, 27.4, 0, -6.8, 1, '#3a6ea5');
+    const cam = camera(V(26, 2.3, -8.6), V(31, 0.7, -2), 760, W, H, 1);
+    const tag = (() => { const p = projectWorld(cam, V(tx, 1.9, tz)); return `<g font-family="Oswald" font-weight="600" text-anchor="middle" style="paint-order:stroke" stroke="#000" stroke-width="4"><text x="${p[0]}" y="${p[1]}" font-size="18" fill="#e8b84a">SENTRY</text><text x="${p[0]}" y="${p[1] + 18}" font-family="Inter" font-size="13" fill="#f2eee6" stroke-width="3">142 / 200 · 300 HP</text></g>`; })();
+    return render(sc, cam, tag + vignette(W, H, 0.75)) + caption('Sentry', 'Place it at the worst window. It holds the line for 90 s, pays you half its kills, and zombies will go for it.');
+  },
+};
+
+const id = location.hash.slice(1) || 'blowtorch';
+const el = document.getElementById(id);
+el.innerHTML = views[id]();
+el.classList.add('on');
+</script>
+</body>
+</html>
