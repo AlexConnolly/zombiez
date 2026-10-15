@@ -14,12 +14,10 @@
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
-    "@trystero-p2p/mqtt": "0.25.4",
     "@trystero-p2p/torrent": "0.25.4",
     "jose": "^6.2.12",
     "pg": "^8.23.1",
     "three": "^0.186.1",
-    "trystero": "0.25.4",
     "ws": "^8.22.0"
   },
   "devDependencies": {

@@ -148,7 +148,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .joinrow { display: flex; align-items: center; gap: 4px; }
 .joinrow input { width: 110px; padding: 6px 10px; margin-left: 22px; background: #15151a; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); font: 600 22px Oswald; letter-spacing: .2em; text-transform: uppercase; }
 .queue-big { font-size: 64px; }
-#lb-members { border-collapse: collapse; width: 100%; }
+#lb-members, #pl-members { border-collapse: collapse; width: 100%; }
+#pl-members td { padding: 8px 6px; border-bottom: 1px solid #2a2622; font-size: 18px; }
+.field { width: 100%; padding: 8px 10px; background: #15151a; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); font: 600 20px Oswald; letter-spacing: .04em; }
+.field.code { flex: 1; letter-spacing: .12em; text-transform: uppercase; }
 #lb-members td { padding: 8px 6px; border-bottom: 1px solid #2a2622; font-size: 18px; }
 #lb-members .ready { color: var(--power); }
 .danger { color: #ff6b6b; border-color: #6b2a2a; }

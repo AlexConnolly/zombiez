@@ -140,14 +140,19 @@ export class NetClient {
     });
     if (this.frames.length > 30) this.frames.shift();
 
-    for (const e of n.events) {
+    this.addEvents(n.events);
+
+    this.ack = n.ack;
+    this.reconcile();
+  }
+
+  /** Server events, from a snapshot or sent on their own. */
+  addEvents(evs: GameEvent[]) {
+    for (const e of evs) {
       // Our own shots and swings were already shown when we pressed the button.
       if ((e.type === 'shot' || e.type === 'melee') && e.pid === this.you) continue;
       this.events.push(e);
     }
-
-    this.ack = n.ack;
-    this.reconcile();
   }
 
   /** Reset to the server's position, then replay every input it has not applied yet. */

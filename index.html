@@ -39,7 +39,7 @@
     </div>
     <nav class="list">
       <button class="btn" data-go="select">Singleplayer</button>
-      <button class="btn" data-go="online">Multiplayer</button>
+      <button class="btn" data-go="party">Multiplayer</button>
       <button class="btn" data-go="settings">Settings</button>
       <button class="btn" data-go="scores">High scores</button>
     </nav>
@@ -108,6 +108,32 @@
       </div>
       <label class="check"><input type="checkbox" id="codes-ok"> I have saved these codes</label>
       <button class="primary cond" id="codes-done" disabled>Continue</button>
+    </div>
+  </div>
+
+  <div id="menu-party" class="screen dim-bg">
+    <button class="back cond" data-go="main">&lsaquo; Back</button>
+    <div class="cond h1">Multiplayer</div>
+    <div class="hint big">Play with up to 3 friends, browser to browser. No accounts, no servers.</div>
+    <div class="panel form">
+      <label class="hint" for="pt-name">Your name</label>
+      <input id="pt-name" class="field" maxlength="12" placeholder="Player" autocomplete="off">
+      <button class="primary cond" id="pt-host">Host a game</button>
+      <div class="hint">or join a friend's game</div>
+      <div class="row"><input id="pt-code" class="field code" maxlength="14" placeholder="XXXX-XXXX-XXXX" autocomplete="off"><button class="ghost cond" id="pt-join">Join</button></div>
+      <div class="hint err" id="pt-err"></div>
+    </div>
+  </div>
+
+  <div id="menu-party-lobby" class="screen dim-bg">
+    <button class="back cond" id="pl-leave">&lsaquo; Leave</button>
+    <div class="cond h1">Room <span class="gold" id="pl-code"></span></div>
+    <div class="panel form">
+      <div class="row"><button class="ghost cond" id="pl-copy">Copy invite link</button></div>
+      <table id="pl-members"></table>
+      <div class="seg" id="pl-map"></div>
+      <button class="primary cond" id="pl-start">Start</button>
+      <div class="hint" id="pl-info"></div>
     </div>
   </div>
 

@@ -1,11 +1,5 @@
 // A connection test for peer-to-peer play: can two browsers on different networks reach each other directly, and how fast?
-import { joinRoom as viaMqtt } from '@trystero-p2p/mqtt';
-import { joinRoom as viaTorrent } from '@trystero-p2p/torrent';
-import { joinRoom as viaNostr } from 'trystero';
-
-/** How the two browsers find each other before connecting: public torrent trackers, Nostr relays or MQTT brokers. */
-const via = new URLSearchParams(location.search).get('via') ?? 'torrent';
-const joinRoom = via === 'nostr' ? viaNostr : via === 'mqtt' ? viaMqtt : viaTorrent;
+import { joinRoom } from '@trystero-p2p/torrent';
 
 const $ = (id: string) => document.getElementById(id)!;
 const log = (s: string) => ($('log').textContent += `${new Date().toLocaleTimeString()} ${s}\n`);
@@ -17,7 +11,7 @@ $('go').addEventListener('click', () => {
   const local = new URLSearchParams(location.search).has('local');
   const room = joinRoom({ appId: 'zombiez-p2p-test', _test_only_mdnsHostFallbackToLoopback: local }, code.value.trim().toUpperCase(), { onJoinError: (e) => log(`Join error: ${e.error}`) });
   $('status').textContent = 'Waiting for the other device…';
-  log(`Joined room ${code.value} via ${via}`);
+  log(`Joined room ${code.value}`);
   room.onPeerJoin = (id) => {
     $('status').textContent = 'Connected';
     $('status').className = 'good';
@@ -54,7 +48,7 @@ $('go').addEventListener('click', () => {
     $('status').className = 'bad';
     log(`Peer ${id.slice(0, 6)} left`);
   };
-  history.replaceState(null, '', `?room=${encodeURIComponent(code.value.trim().toUpperCase())}&via=${via}`);
+  history.replaceState(null, '', `?room=${encodeURIComponent(code.value.trim().toUpperCase())}`);
 });
 
 /** Direct (host or srflx candidates) or through a relay. */

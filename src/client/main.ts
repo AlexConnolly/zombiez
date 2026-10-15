@@ -6,6 +6,7 @@ import type { ServerMsg } from '../net/protocol';
 import { Account } from './account';
 import { Sound } from './audio';
 import { initLobbyUi } from './lobby-ui';
+import { initPartyUi } from './party-ui';
 import { Renderer, type Snap } from './render';
 
 let map = mapById(new URLSearchParams(location.search).get('map') ?? localStorage.getItem('zombiez.map'));
@@ -70,11 +71,10 @@ let startTick = 0;
 let settingsBack = 'main';
 
 /** The online session, or null in solo. The NetClient survives reconnects; only the socket is replaced. */
-let online: { net: NetClient; ws: WebSocket | null; url: string; matchId: string; token: string; leaving: boolean; retryUntil: number; started: boolean } | null = null;
+let online: { net: NetClient; ws: WebSocket | null; url: string; matchId: string; token: string; leaving: boolean; retryUntil: number; started: boolean; close?: () => void } | null = null;
 const account = new Account();
 /** Off until the online services are hosted; the static site has no control or game server. */
 const MULTIPLAYER = false;
-if (!MULTIPLAYER) $('[data-go="online"]').remove();
 let overTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ---------------------------------------------------------------- input
@@ -175,6 +175,7 @@ function go(target: string) {
   if (target === 'settings' && app === 'paused') settingsBack = 'pause';
   if (target === 'main' && settingsBack === 'pause' && app === 'paused') { settingsBack = 'main'; return show('pause'); }
   if (target === 'online') return lobbyUi.openOnline();
+  if (target === 'party') return partyUi.open();
   if (target === 'profile') void lobbyUi.openProfile();
   if (target === 'leaderboard') void lobbyUi.openLeaderboard();
   show(`menu-${target}`);
@@ -263,7 +264,7 @@ $('#start').addEventListener('click', startGame);
 $('#again').addEventListener('click', () => {
   if (!online) return startGame();
   toMenu();
-  lobbyUi.openOnline();
+  partyUi.open();
 });
 $('#to-menu').addEventListener('click', toMenu);
 $('#quit').addEventListener('click', toMenu);
@@ -283,6 +284,39 @@ const lobbyUi = initLobbyUi({
   onMatch: (url, matchId, token) => startOnline(url, matchId, token),
   inGame: () => !!online,
 });
+
+const partyUi = initPartyUi({
+  show: (id) => show(id),
+  map: () => map,
+  onPlay: (net, close) => {
+    sound.start();
+    clearTimeout(overTimer);
+    leaveOnline();
+    online = { net, ws: null, url: '', matchId: '', token: '', leaving: false, retryUntil: 0, started: false, close };
+    begin(online);
+    lock();
+  },
+  onHostLeft: () => {
+    if (online) toMenu();
+    partyUi.open();
+    $('#pt-err').textContent = 'The host left the game.';
+  },
+});
+
+/** The first welcome from the match: switch the view over to it. */
+function begin(o: NonNullable<typeof online>) {
+  o.started = true;
+  localId = o.net.you;
+  renderer.localId = localId;
+  sim = o.net.sim;
+  renderer.load(sim);
+  startTick = sim.state.tick;
+  yaw = 0;
+  pitch = 0;
+  acc = 0;
+  app = 'playing';
+  show(null);
+}
 
 /** Joins a match on a game server with a ticket from the control service. */
 function startOnline(url: string, matchId: string, token: string) {
@@ -314,19 +348,7 @@ function connect() {
     if (m.t === 'welcome') {
       o.retryUntil = 0;
       status('');
-      if (!o.started) {
-        o.started = true;
-        localId = o.net.you;
-        renderer.localId = localId;
-        sim = o.net.sim;
-        renderer.load(sim);
-        startTick = sim.state.tick;
-        yaw = 0;
-        pitch = 0;
-        acc = 0;
-        app = 'playing';
-        show(null);
-      }
+      if (!o.started) begin(o);
     }
     if (m.t === 'error') {
       o.leaving = true;
@@ -351,8 +373,8 @@ function connect() {
 function leaveOnline() {
   if (!online) return;
   online.leaving = true;
-  online.net.leave();
-  online.ws?.close();
+  if (online.close) online.close();
+  else { online.net.leave(); online.ws?.close(); }
   online = null;
   localId = 'p1';
   renderer.localId = localId;
